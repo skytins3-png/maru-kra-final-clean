@@ -572,7 +572,7 @@ def _six_trifecta_orders(nums3: List[int], key: str = "stable") -> List[str]:
     return ["-".join(map(str, p)) for p in orders[:6]]
 
 def build_18ticket_purchase_plan(score_df: pd.DataFrame, result: Dict[str, Any] = None, total_budget: int = 18000) -> Dict[str, Any]:
-    active_nums = _active_horse_numbers_from_score_df(score_df)  # NON_STARTER_FILTER_18TICKET
+    active_nums = _active_horse_numbers_from_score_df(df)  # SCOREDF_NAMEFIXN_STARTER_FILTER_18TICKET
     """추천 결과를 18마권 구매표로 변환합니다.
     자동구매가 아니라 더비온에 수동 입력하기 위한 복사표만 생성합니다.
     """
@@ -835,7 +835,7 @@ def build_3group_recommendation_from_score(score_df: pd.DataFrame) -> Dict[str, 
     g1 = nums[:3]
     g2 = [nums[0], nums[3], nums[4]]
     g3 = nums[-3:]
-    active_nums = _active_horse_numbers_from_score_df(score_df)  # NON_STARTER_FILTER_BUILD3
+    active_nums = _active_horse_numbers_from_score_df(df)  # SCOREDF_NAMEFIXN_STARTER_FILTER_BUILD3
     if active_nums:
         g1 = _filter_group_to_active(g1, active_nums)
         g2 = _filter_group_to_active(g2, active_nums)
@@ -1893,7 +1893,7 @@ def score_and_recommend(horses: pd.DataFrame, env: Dict[str, Any], sim_count: in
     # 세 그룹이 너무 겹치면 기존 상위 9마리로 보정
     if len({tuple(g) for g in triple_groups}) < 3:
         triple_groups = make_triple_groups_from_nums(all_nums)
-    active_nums = _active_horse_numbers_from_score_df(score_df)  # NON_STARTER_FILTER_SCORE_AND_RECOMMEND
+    active_nums = _active_horse_numbers_from_score_df(df)  # NON_STARTER_FILTER_SCORE_AND_RECOMMEND_SCOREDF_NAMEFIX
     if active_nums:
         triple_groups = [_filter_group_to_active(g, active_nums) for g in triple_groups]
     triple_18 = expand_triple_18(triple_groups)
