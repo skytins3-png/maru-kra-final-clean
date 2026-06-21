@@ -555,12 +555,13 @@ def _top_nums_by_column(score_df: pd.DataFrame, score_col: str, fallback_col: st
         return _unique_int_list([])
 
 def _six_trifecta_orders(nums3: List[int], key: str = "stable") -> List[str]:
+    from itertools import permutations  # GEMINI_LOCAL_IMPORT_SIX
     from itertools import permutations  # SIX_TICKET_HARD_FIX
     """3마리 기준 삼쌍승 6개 순열."""
     nums = _unique_int_list(nums3)[:3]
     if len(nums) < 3:
         nums = _unique_int_list(nums + [1,2,3])[:3]
-    orders = list(__import__('itertools').permutations(nums, 3))
+    orders = list(permutations(nums, 3))
     # 안정형은 축마 1착을 먼저, 고배당은 구멍마 1착 가능성을 앞쪽, 변수형은 변동 후보를 앞쪽
     if key == "stable":
         orders = sorted(orders, key=lambda p: (p[0] != nums[0], p[1] != nums[1], p))
@@ -773,6 +774,7 @@ def render_18ticket_cards(latest: Dict[str, Any]) -> None:
 
 
 def build_3group_recommendation_from_score(score_df: pd.DataFrame) -> Dict[str, Any]:
+    from itertools import permutations  # GEMINI_LOCAL_IMPORT_BUILD3
     from itertools import permutations  # THREE_GROUP_HARD_FIX
     from itertools import permutations  # HARD_FIX
     """점수표에서 3조합 삼쌍승 18장을 구성합니다."""
@@ -787,7 +789,7 @@ def build_3group_recommendation_from_score(score_df: pd.DataFrame) -> Dict[str, 
     g3 = nums[-3:]
     tickets = []
     for g in [g1, g2, g3]:
-        tickets += ["-".join(map(str, p)) for p in __import__('itertools').permutations(g, 3)]
+        tickets += ["-".join(map(str, p)) for p in permutations(g, 3)]
     return {
         "공격삼쌍승": f"{g1[0]}→{g1[1]}→{g1[2]}",
         "방어삼복승": f"{g1[0]}-{g1[1]}-{g1[2]}",
@@ -3104,6 +3106,7 @@ def make_triple_groups_from_nums(nums: List[Any]) -> List[List[str]]:
 
 
 def expand_triple_18(groups: List[List[str]]) -> List[str]:
+    from itertools import permutations  # GEMINI_LOCAL_IMPORT_EXPAND18
     from itertools import permutations  # EXPAND_TRIPLE_HARD_FIX
     """3묶음 × 각 6순열 = 삼쌍승 18장."""
     import itertools
@@ -3112,7 +3115,7 @@ def expand_triple_18(groups: List[List[str]]) -> List[str]:
         clean = _unique_horse_list(g, 20)[:3]
         if len(clean) < 3:
             continue
-        for p in __import__('itertools').permutations(clean, 3):
+        for p in permutations(clean, 3):
             tickets.append("-".join(map(str, p)))
     return tickets[:18]
 
