@@ -555,11 +555,12 @@ def _top_nums_by_column(score_df: pd.DataFrame, score_col: str, fallback_col: st
         return _unique_int_list([])
 
 def _six_trifecta_orders(nums3: List[int], key: str = "stable") -> List[str]:
+    from itertools import permutations  # SIX_TICKET_HARD_FIX
     """3마리 기준 삼쌍승 6개 순열."""
     nums = _unique_int_list(nums3)[:3]
     if len(nums) < 3:
         nums = _unique_int_list(nums + [1,2,3])[:3]
-    orders = list(itertools.permutations(nums, 3))
+    orders = list(permutations(nums, 3))
     # 안정형은 축마 1착을 먼저, 고배당은 구멍마 1착 가능성을 앞쪽, 변수형은 변동 후보를 앞쪽
     if key == "stable":
         orders = sorted(orders, key=lambda p: (p[0] != nums[0], p[1] != nums[1], p))
@@ -772,6 +773,7 @@ def render_18ticket_cards(latest: Dict[str, Any]) -> None:
 
 
 def build_3group_recommendation_from_score(score_df: pd.DataFrame) -> Dict[str, Any]:
+    from itertools import permutations  # THREE_GROUP_HARD_FIX
     from itertools import permutations  # HARD_FIX
     """점수표에서 3조합 삼쌍승 18장을 구성합니다."""
     if score_df is None or score_df.empty or "마번" not in score_df.columns:
@@ -3109,7 +3111,7 @@ def expand_triple_18(groups: List[List[str]]) -> List[str]:
         clean = _unique_horse_list(g, 20)[:3]
         if len(clean) < 3:
             continue
-        for p in itertools.permutations(clean, 3):
+        for p in permutations(clean, 3):
             tickets.append("-".join(map(str, p)))
     return tickets[:18]
 
