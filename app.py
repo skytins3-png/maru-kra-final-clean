@@ -28,7 +28,7 @@ from typing import Dict, List, Tuple, Any, Optional
 import pandas as pd
 import requests
 
-# HOTFIX_LOADING_FAST: 첫 화면 10분 로딩 방지 · 초기 API 자동호출 OFF · 버튼 클릭 시만 실시간 수집
+# HOTFIX_LOADING_FAST: 첫 화면 10분 로딩 방지 · 초기 API 자동수집 ON · 버튼 클릭 시만 실시간 수집
 import urllib3
 import streamlit as st
 import streamlit.components.v1 as components
@@ -3669,19 +3669,30 @@ def render_live_panel(rc_date: str, meet: str, race_no: int, selected: List[str]
     with col_b:
         run_sim = st.button("불러오기 + 시뮬레이션")
 
-    if run or run_sim:
-        with st.spinner("실시간 API 수집 중... 최대 30~60초 걸릴 수 있습니다."):
+    current_race_key = f"{rc_date}|{meet}|{int(race_no)}"
+    previous_race_key = st.session_state.get("live_race_key")
+    if previous_race_key != current_race_key:
+        st.session_state["live_data"] = {}
+        st.session_state["api_status"] = pd.DataFrame()
+        st.session_state["live_race_key"] = current_race_key
+
+    should_auto_fetch = not st.session_state.get("live_data")
+    if run or run_sim or should_auto_fetch:
+        with st.spinner(f"{meet} {int(race_no)}경주 실시간 API 수집 중... 최대 30~60초 걸릴 수 있습니다."):
             data, status = fetch_all_live(rc_date, meet, int(race_no), selected)
+        data = _filter_data_selected_race(data, rc_date, meet, int(race_no)) if "_filter_data_selected_race" in globals() else data
         st.session_state["live_data"] = data
         st.session_state["api_status"] = status
+        st.session_state["live_race_key"] = current_race_key
     elif not st.session_state.get("live_data"):
-        # 첫 화면에서는 API를 자동 호출하지 않습니다.
-        # Streamlit Cloud에서 외부 API 응답 지연이 있으면 흰 화면/스피너가 오래 지속되기 때문입니다.
         cache = load_live_cache()
+        cache = _filter_data_selected_race(cache, rc_date, meet, int(race_no)) if "_filter_data_selected_race" in globals() else cache
         st.session_state["live_data"] = cache if cache else {}
-        st.session_state["api_status"] = pd.DataFrame([{"API":"초기화","상태":"첫 화면 빠른 로딩: API 자동호출 OFF · 버튼 클릭 시 수집","행수":sum(len(v) for v in cache.values()) if cache else 0}])
+        st.session_state["api_status"] = pd.DataFrame([{"API":"초기화","상태":f"{meet} {int(race_no)}경주 캐시 확인 · API 데이터 없음","행수":sum(len(v) for v in cache.values()) if cache else 0}])
 
     data = st.session_state.get("live_data", {})
+    data = _filter_data_selected_race(data, rc_date, meet, int(race_no)) if "_filter_data_selected_race" in globals() else data  # REALTIME_CURRENT_RACE_FILTER_AFTER_SESSION
+    st.session_state["live_data"] = data
     data = _filter_data_selected_race(data, rc_date, meet, int(race_no))  # SELECTED_RACE_DATAFLOW_FILTER
     st.session_state["live_data"] = data
     status = st.session_state.get("api_status", pd.DataFrame())
