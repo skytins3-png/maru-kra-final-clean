@@ -560,7 +560,7 @@ def _six_trifecta_orders(nums3: List[int], key: str = "stable") -> List[str]:
     nums = _unique_int_list(nums3)[:3]
     if len(nums) < 3:
         nums = _unique_int_list(nums + [1,2,3])[:3]
-    orders = list(itertools.permutations(nums, 3))
+    orders = list(__import__('itertools').permutations(nums, 3))
     # 안정형은 축마 1착을 먼저, 고배당은 구멍마 1착 가능성을 앞쪽, 변수형은 변동 후보를 앞쪽
     if key == "stable":
         orders = sorted(orders, key=lambda p: (p[0] != nums[0], p[1] != nums[1], p))
@@ -787,7 +787,7 @@ def build_3group_recommendation_from_score(score_df: pd.DataFrame) -> Dict[str, 
     g3 = nums[-3:]
     tickets = []
     for g in [g1, g2, g3]:
-        tickets += ["-".join(map(str, p)) for p in itertools.permutations(g, 3)]
+        tickets += ["-".join(map(str, p)) for p in __import__('itertools').permutations(g, 3)]
     return {
         "공격삼쌍승": f"{g1[0]}→{g1[1]}→{g1[2]}",
         "방어삼복승": f"{g1[0]}-{g1[1]}-{g1[2]}",
@@ -3112,7 +3112,7 @@ def expand_triple_18(groups: List[List[str]]) -> List[str]:
         clean = _unique_horse_list(g, 20)[:3]
         if len(clean) < 3:
             continue
-        for p in itertools.permutations(clean, 3):
+        for p in __import__('itertools').permutations(clean, 3):
             tickets.append("-".join(map(str, p)))
     return tickets[:18]
 
