@@ -572,7 +572,7 @@ def _six_trifecta_orders(nums3: List[int], key: str = "stable") -> List[str]:
     return ["-".join(map(str, p)) for p in orders[:6]]
 
 def build_18ticket_purchase_plan(score_df: pd.DataFrame, result: Dict[str, Any] = None, total_budget: int = 18000) -> Dict[str, Any]:
-    active_nums = _active_horse_numbers_from_score_df(df)  # SCOREDF_NAMEFIXN_STARTER_FILTER_18TICKET
+    active_nums = _active_horse_numbers_from_score_df(score_df)  # TICKET_SCOREDF_PARAM_FIX
     """추천 결과를 18마권 구매표로 변환합니다.
     자동구매가 아니라 더비온에 수동 입력하기 위한 복사표만 생성합니다.
     """
@@ -3200,12 +3200,39 @@ def parse_groups_from_latest(latest: Dict[str, Any]) -> List[List[str]]:
 def groups_to_text(groups: List[List[str]]) -> str:
     return " | ".join("-".join(map(str, g[:3])) for g in groups[:3] if len(g) >= 3)
 
+
+def _safe_first_mobile_row(ready: Any, fallback: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """모바일 추천 데이터가 비어도 앱이 죽지 않도록 첫 row를 안전하게 반환합니다."""
+    fallback = dict(fallback or {})
+    try:
+        if isinstance(ready, pd.DataFrame) and not ready.empty:
+            return _safe_first_mobile_row(ready)
+        if isinstance(ready, list) and len(ready) > 0:
+            first = ready[0]
+            return dict(first) if isinstance(first, dict) else fallback
+        if isinstance(ready, dict) and ready:
+            return dict(ready)
+    except Exception:
+        pass
+    row = dict(fallback)
+    row.setdefault("경마장", "서울")
+    row.setdefault("경주번호", 1)
+    row.setdefault("경주시간", "")
+    row.setdefault("상태", "추천대기")
+    row.setdefault("데이터상태", "모바일 추천 데이터 없음")
+    row.setdefault("대표추천", "대기")
+    row.setdefault("추천금액", 18000)
+    return row
+
+
 def render_mobile_quick_view() -> None:
     """갤럭시 S26 Ultra 256GB 맞춤 모바일: 분석 앱 → 10초 수동구매 모드 → 공식 구매표 이동 흐름."""
     css()
     st.caption("S26 Ultra 256GB 맞춤 · 더비온 등록완료 모드 · 자동구매/자동결제 없음 · 공식 구매표에서 직접 입력·확정")
 
     ready = mobile_ready_recommendations(20)
+    if isinstance(ready, pd.DataFrame) and ready.empty:  # MOBILE_READY_EMPTY_GUARD
+        ready = pd.DataFrame([_safe_first_mobile_row({}, {})])
     if ready.empty:
         st.markdown(
             f"""
@@ -3234,7 +3261,7 @@ def render_mobile_quick_view() -> None:
             mobile_race_no = st.number_input("경주", min_value=1, max_value=20, value=default_no, step=1, key="mobile_run_race_no")
         with mcol3:
             mobile_race_time = st.text_input("경주시간", value=default_time, placeholder="예: 14:30", key="mobile_run_race_time")
-    latest = sync_row_to_current_race(ready.iloc[0].to_dict(), force_if_stale=True)
+    latest = sync_row_to_current_race(_safe_first_mobile_row(ready), force_if_stale=True)
     # 실제 시간표가 현재 6R인데 mobile_recommend.json이 1R로 남는 문제를 여기서 최종 차단
     meet = str(latest.get("경마장", "서울"))
     race_no = _norm_race_no(latest.get("경주번호", "-"))
