@@ -3234,6 +3234,16 @@ def render_mobile_quick_view() -> None:
             mobile_race_no = st.number_input("경주", min_value=1, max_value=20, value=default_no, step=1, key="mobile_run_race_no")
         with mcol3:
             mobile_race_time = st.text_input("경주시간", value=default_time, placeholder="예: 14:30", key="mobile_run_race_time")
+    auto_race_time = st.sidebar.checkbox("현재 시간 기준 경주 자동선택", value=True, help="시간표/캐시가 있으면 현재 KST 기준 다음 경주를 자동으로 잡습니다.")  # SIDEBAR_AUTO_RACE_TIME_PICK
+    if auto_race_time:
+        _sched_sidebar = _load_schedule_for_sidebar(rc_date, meet)
+        _auto_race_no, _auto_time = _auto_pick_race_from_schedule(_sched_sidebar, meet)
+        if _auto_race_no:
+            race_no = int(_auto_race_no)
+            rc_time = _auto_time or locals().get("rc_time", "")
+            st.sidebar.success(f"자동선택: {meet} {race_no}경주 · {rc_time}")
+        else:
+            st.sidebar.info("시간표 데이터가 아직 없어 수동 경주번호를 사용합니다.")
         st.caption("PC가 꺼져 있어도 Streamlit Cloud에서 API/캐시 분석 후 mobile_recommend.json을 저장합니다.")
         r0, r1 = st.columns(2)
         with r0:
@@ -3890,6 +3900,89 @@ def render_help_panel() -> None:
 - 접속자가 없어도 자동 분석하려면 동봉된 GitHub Actions 또는 서버 cron이 `auto_hub_runner.py`를 실행합니다.
 """
     )
+
+
+
+def _parse_hhmm_to_minutes(value: Any) -> Optional[int]:
+    """'14:30', '1430', 1430, '14.30' 같은 값을 분 단위로 변환합니다."""
+    try:
+        s = str(value).strip()
+        if not s or s.lower() in ["nan", "none"]:
+            return None
+        s = s.replace(".", ":").replace("시", ":").replace("분", "")
+        m = re.search(r"(\d{1,2})\s*:\s*(\d{1,2})", s)
+        if m:
+            h, mi = int(m.group(1)), int(m.group(2))
+            if 0 <= h <= 23 and 0 <= mi <= 59:
+                return h * 60 + mi
+        digits = re.sub(r"\D", "", s)
+        if len(digits) in [3, 4]:
+            h = int(digits[:-2])
+            mi = int(digits[-2:])
+            if 0 <= h <= 23 and 0 <= mi <= 59:
+                return h * 60 + mi
+    except Exception:
+        return None
+    return None
+
+def _minutes_to_hhmm(minutes: Optional[int]) -> str:
+    if minutes is None:
+        return ""
+    return f"{minutes // 60:02d}:{minutes % 60:02d}"
+
+def _auto_pick_race_from_schedule(schedule_df: pd.DataFrame, meet: str, now_dt: Optional[datetime.datetime] = None) -> Tuple[Optional[int], str]:
+    """현재 KST 기준으로 다음 경주번호와 예정시각을 자동 선택합니다."""
+    if now_dt is None:
+        try:
+            now_dt = datetime.datetime.now(KST)
+        except Exception:
+            now_dt = datetime.datetime.now()
+    if schedule_df is None or not isinstance(schedule_df, pd.DataFrame) or schedule_df.empty:
+        return None, ""
+
+    df = schedule_df.copy()
+    meet_cols = ["경마장", "meet", "MEET", "경주장", "장소"]
+    race_cols = ["경주번호", "race_no", "RACE_NO", "rcNo", "경주", "race"]
+    time_cols = ["경주예정시각", "예정시각", "출발시각", "경주시간", "race_time", "rcTime", "time"]
+
+    mcol = next((c for c in meet_cols if c in df.columns), None)
+    rcol = next((c for c in race_cols if c in df.columns), None)
+    tcol = next((c for c in time_cols if c in df.columns), None)
+
+    if mcol is not None:
+        df = df[df[mcol].astype(str).str.contains(str(meet), na=False)]
+    if rcol is None or tcol is None or df.empty:
+        return None, ""
+
+    df["_race_no_auto"] = pd.to_numeric(df[rcol], errors="coerce")
+    df["_time_min_auto"] = df[tcol].apply(_parse_hhmm_to_minutes)
+    df = df.dropna(subset=["_race_no_auto", "_time_min_auto"])
+    if df.empty:
+        return None, ""
+
+    now_min = now_dt.hour * 60 + now_dt.minute
+    # 아직 출발 전인 다음 경주 우선, 모두 지났으면 마지막 경주
+    future = df[df["_time_min_auto"] >= now_min].sort_values("_time_min_auto")
+    row = future.iloc[0] if not future.empty else df.sort_values("_time_min_auto").iloc[-1]
+    return int(row["_race_no_auto"]), _minutes_to_hhmm(int(row["_time_min_auto"]))
+
+def _load_schedule_for_sidebar(rc_date: str, meet: str) -> pd.DataFrame:
+    """사이드바 자동 경주 선택용 시간표를 캐시/live_data에서 최대한 가져옵니다."""
+    try:
+        live = st.session_state.get("live_data", {})
+        sched = extract_schedule_from_data(live, rc_date, meet)
+        if isinstance(sched, pd.DataFrame) and not sched.empty:
+            return sched
+    except Exception:
+        pass
+    try:
+        cache = load_live_cache()
+        sched = extract_schedule_from_data(cache, rc_date, meet)
+        if isinstance(sched, pd.DataFrame) and not sched.empty:
+            return sched
+    except Exception:
+        pass
+    return pd.DataFrame()
 
 
 def render() -> None:
