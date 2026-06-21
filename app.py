@@ -590,6 +590,23 @@ def build_18ticket_purchase_plan(score_df: pd.DataFrame, result: Dict[str, Any] 
     high3 = _unique_int_list((high_nums[:1] + base[:2] + high_nums[1:3]) or base[:4])[:3]
     high3 = _filter_group_to_active(high3, active_nums) if active_nums else high3
     variable3 = _unique_int_list((variable_nums[:2] + base[:3]) or base[:4])[:3]
+    variable3 = _filter_group_to_active(variable3, active_nums) if active_nums else variable3
+
+    if len(stable3) < 3 or len(high3) < 3 or len(variable3) < 3:
+        return {
+            "18마권": "N",
+            "마권수": 0,
+            "단위금액": unit,
+            "총추천금액": 0,
+            "안정형6": [],
+            "고배당형6": [],
+            "변수대응형6": [],
+            "삼쌍승18조합": "",
+            "안정형대표": "",
+            "고배당형대표": "",
+            "변수대응형대표": "",
+            "구매표복사": "[삼쌍승 18마권 수동입력표]\n출전표 확인중: 실제 출전마 3두 이상 확인 후 표시",
+        }
 
     stable6 = _six_trifecta_orders(stable3, "stable")
     high6 = _six_trifecta_orders(high3, "high")
@@ -827,14 +844,20 @@ def build_3group_recommendation_from_score(score_df: pd.DataFrame) -> Dict[str, 
     from itertools import permutations  # HARD_FIX
     """점수표에서 3조합 삼쌍승 18장을 구성합니다."""
     if score_df is None or score_df.empty or "마번" not in score_df.columns:
-        nums = [1, 2, 3, 4, 5, 6, 7]
+        nums = []  # NO_FAKE_HORSE_FILL: 출전표 없으면 가짜 1~7 생성 금지
     else:
         nums = pd.to_numeric(score_df["마번"], errors="coerce").dropna().astype(int).tolist()
-    while len(nums) < 7:
-        nums.append(len(nums) + 1)
+    nums = _unique_int_list(nums)
+    if len(nums) < 3:
+        return {
+            "공격삼쌍승": "추천대기",
+            "방어삼복승": "추천대기",
+            "삼쌍승3묶음": "",
+            "삼쌍승18조합": "",
+        }
     g1 = nums[:3]
-    g2 = [nums[0], nums[3], nums[4]]
-    g3 = nums[-3:]
+    g2 = _unique_int_list([nums[0]] + nums[3:5] + nums[:3])[:3]
+    g3 = _unique_int_list(nums[-3:] + nums[:3])[:3]
     active_nums = _active_horse_numbers_from_score_df(score_df)  # BUILD3_SCOREDF_PARAM_FIX
     if active_nums:
         g1 = _filter_group_to_active(g1, active_nums)
@@ -1703,7 +1726,7 @@ def current_filter(df: pd.DataFrame, rc_date: str, meet: str, race_no: int) -> p
 def sample_data() -> pd.DataFrame:
     df = pd.DataFrame([
         {"마번": 5, "마명": "마루스피드", "레이팅": 78, "최근순위": 2, "승률": 18, "복승률": 42, "예상배당": 9.2, "체중변화": -2, "기수점수": 75, "인기": 4},
-        {"마번": 11, "마명": "그린파워", "레이팅": 75, "최근순위": 3, "승률": 15, "복승률": 38, "예상배당": 7.8, "체중변화": -1, "기수점수": 72, "인기": 5},
+        {"마번": 1, "마명": "샘플1", "레이팅": 75, "최근순위": 3, "승률": 15, "복승률": 38, "예상배당": 7.8, "체중변화": -1, "기수점수": 72, "인기": 5},
         {"마번": 2, "마명": "블루런", "레이팅": 72, "최근순위": 4, "승률": 12, "복승률": 35, "예상배당": 12.5, "체중변화": 0, "기수점수": 69, "인기": 7},
         {"마번": 7, "마명": "라스트킹", "레이팅": 70, "최근순위": 5, "승률": 10, "복승률": 30, "예상배당": 15.4, "체중변화": 2, "기수점수": 67, "인기": 8},
         {"마번": 3, "마명": "해피로드", "레이팅": 66, "최근순위": 6, "승률": 8, "복승률": 25, "예상배당": 22.0, "체중변화": -4, "기수점수": 65, "인기": 9},
@@ -1873,7 +1896,7 @@ def score_and_recommend(horses: pd.DataFrame, env: Dict[str, Any], sim_count: in
     def unique_take(seq, used=None, n=3):
         used = set(used or [])
         out = []
-        for x in seq + list(range(1, 21)):
+        for x in seq:  # NO_FAKE_HORSE_FILL: 출전표 밖 말번호 임의 보충 금지
             try:
                 xx = int(x)
                 if 1 <= xx <= 20 and xx not in out and (len(out) == 0 or xx not in used):
@@ -1901,7 +1924,7 @@ def score_and_recommend(horses: pd.DataFrame, env: Dict[str, Any], sim_count: in
     axis = int(group1[0]); mate = int(group1[1]); sub = int(group1[2]); hole = int(group3[0])
 
     # Monte Carlo-ish combo list based on score weights.
-    nums = all_nums or list(range(1, 13))
+    nums = all_nums or []  # NO_FAKE_HORSE_FILL: 출전표 없으면 임의 말번호 생성 금지
     weights = df["점수"].clip(lower=1).tolist() if not df.empty else [1] * len(nums)
     combos: List[Dict[str, Any]] = []
     rng_count = max(200, int(sim_count))
