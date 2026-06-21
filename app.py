@@ -3690,6 +3690,64 @@ def _validate_selected_race_horses(score_df: pd.DataFrame, meet: str, race_no: i
     return df.reset_index(drop=True)
 
 
+
+# END_OF_DAY_HARD_STOP_FINAL
+def _end_of_day_kst_stop(rc_date: str = "", meet: str = "서울") -> Tuple[bool, Optional[int], str]:
+    """오늘 경주 종료 후 기본값 서울 1경주 실시간 수집 루프를 강제로 막습니다."""
+    try:
+        now = now_kst()
+    except Exception:
+        now = datetime.datetime.now()
+
+    # 18시 이후는 한국 경마 실전 화면에서 경주 종료/정산 시간대로 보고 API 실시간 수집을 멈춥니다.
+    ended_by_clock = now.hour >= 18
+
+    last_no: Optional[int] = None
+    last_time = ""
+
+    try:
+        cur = current_live_race_from_schedule(meet, rc_date or today_kst())
+        if cur:
+            last_no = int(cur.get("경주번호", 0) or 0) or None
+            last_time = str(cur.get("경주시간", "") or "")
+    except Exception:
+        pass
+
+    try:
+        sched = _load_schedule_for_sidebar(rc_date or today_kst(), meet) if "_load_schedule_for_sidebar" in globals() else pd.DataFrame()
+        if isinstance(sched, pd.DataFrame) and not sched.empty:
+            race_cols = [c for c in sched.columns if str(c) in ["경주번호", "race_no", "RACE_NO", "rcNo", "경주", "race"]]
+            time_cols = [c for c in sched.columns if str(c) in ["경주예정시각", "예정시각", "출발시각", "경주시간", "race_time", "rcTime", "time", "출발시간"]]
+            if race_cols:
+                nums = pd.to_numeric(sched[race_cols[0]], errors="coerce").dropna().astype(int).tolist()
+                if nums:
+                    last_no = max(nums)
+            if time_cols:
+                times = []
+                for v in sched[time_cols[0]].tolist():
+                    mm = _parse_hhmm_to_minutes(v) if "_parse_hhmm_to_minutes" in globals() else None
+                    if mm is not None:
+                        times.append((mm, v))
+                if times:
+                    times.sort()
+                    last_time = _minutes_to_hhmm(times[-1][0]) if "_minutes_to_hhmm" in globals() else str(times[-1][1])
+                    now_min = now.hour * 60 + now.minute
+                    ended_by_clock = ended_by_clock or now_min > int(times[-1][0]) + 20
+    except Exception:
+        pass
+
+    return bool(ended_by_clock), last_no, last_time
+
+def _end_of_day_cache_status(meet: str, race_no: int) -> pd.DataFrame:
+    return pd.DataFrame([{
+        "API": "경주종료",
+        "key": "end_of_day",
+        "행수": 0,
+        "상태": f"오늘 {meet} 경주 종료 · {int(race_no)}경주 기준 저장/캐시 표시 · 실시간 API 수집 중단",
+        "URL": ""
+    }])
+
+
 def render_live_panel(rc_date: str, meet: str, race_no: int, selected: List[str], sim_count: int, risk_mode: str) -> Tuple[pd.DataFrame, Dict[str, Any], List[Dict[str, Any]], Dict[str, pd.DataFrame], pd.DataFrame, Dict[str, Any]]:
     st.markdown("### 실시간 KRA 분석")
     if "live_data" not in st.session_state:
@@ -3709,8 +3767,19 @@ def render_live_panel(rc_date: str, meet: str, race_no: int, selected: List[str]
         st.session_state["api_status"] = pd.DataFrame()
         st.session_state["live_race_key"] = current_race_key
 
-    should_auto_fetch = not st.session_state.get("live_data")
-    if run or run_sim or should_auto_fetch:
+    ended_today, last_race_no, last_race_time = _end_of_day_kst_stop(rc_date, meet)  # END_OF_DAY_HARD_STOP_RENDER_LIVE
+    if ended_today:
+        if last_race_no:
+            race_no = int(last_race_no)
+            current_race_key = f"{rc_date}|{meet}|{int(race_no)}"
+        st.warning(f"오늘 {meet} 경주는 종료되었습니다. 서울 1경주 실시간 수집을 중단하고 저장/캐시 결과만 표시합니다.")
+        cache_data = st.session_state.get("live_data", {}) or load_live_cache()
+        cache_data = _filter_data_selected_race(cache_data, rc_date, meet, int(race_no)) if "_filter_data_selected_race" in globals() else cache_data
+        st.session_state["live_data"] = cache_data if cache_data else {}
+        st.session_state["api_status"] = _end_of_day_cache_status(meet, int(race_no))
+        st.session_state["live_race_key"] = current_race_key
+    should_auto_fetch = (not ended_today) and (not st.session_state.get("live_data"))
+    if (not ended_today) and (run or run_sim or should_auto_fetch):
         with st.spinner(f"{meet} {int(race_no)}경주 실시간 API 수집 중... 최대 30~60초 걸릴 수 있습니다."):
             data, status = fetch_all_live(rc_date, meet, int(race_no), selected)
         data = _filter_data_selected_race(data, rc_date, meet, int(race_no)) if "_filter_data_selected_race" in globals() else data
