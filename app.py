@@ -3198,7 +3198,7 @@ def parse_groups_from_latest(latest: Dict[str, Any]) -> List[List[str]]:
 
 
 def groups_to_text(groups: List[List[str]]) -> str:
-    return " | ".join("-".join(g[:3]) for g in groups[:3])
+    return " | ".join("-".join(map(str, g[:3])) for g in groups[:3] if len(g) >= 3)
 
 def render_mobile_quick_view() -> None:
     """갤럭시 S26 Ultra 256GB 맞춤 모바일: 분석 앱 → 10초 수동구매 모드 → 공식 구매표 이동 흐름."""
