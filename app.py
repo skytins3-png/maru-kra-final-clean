@@ -3539,7 +3539,7 @@ def render_live_panel(rc_date: str, meet: str, race_no: int, selected: List[str]
     score_df, result, combos = score_and_recommend(horses, env, sim_count, risk_mode)
 
     live_rows = sum(len(v) for v in data.values()) if data else 0
-    sample_mode = not api_required_group_pass(status_df, live_rows)
+    sample_mode = not api_required_group_pass(status_df if 'status_df' in locals() else st.session_state.get('api_status_df', pd.DataFrame()), live_rows)
     if sample_mode:
         st.markdown('<div class="info-box-warn">⚠ 실전 검증 추천이 아닙니다. 필수 성공 API 묶음이 부족하여 검증대기 상태입니다. 결과대기 API는 실패로 보지 않습니다.</div>', unsafe_allow_html=True)
     else:
