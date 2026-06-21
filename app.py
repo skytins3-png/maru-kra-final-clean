@@ -1065,9 +1065,9 @@ def try_push_hub_file_to_github(relative_path: str, content_text: str, message: 
 
 
 DERBYON_BUY_URL = "https://todayrace.kra.co.kr"
-CLOUD_APP_URL = "https://maru-kra-mobile-final-m52adz9wjrob3vgtxdgvu9.streamlit.app"
-CLOUD_MOBILE_URL = "https://maru-kra-mobile-final-m52adz9wjrob3vgtxdgvu9.streamlit.app/?mode=mobile"
-CLOUD_PC_URL = "https://maru-kra-mobile-final-m52adz9wjrob3vgtxdgvu9.streamlit.app/?mode=pc"
+CLOUD_APP_URL = "https://maru-kra-final-clean.streamlit.app/?mode=mobile"
+CLOUD_MOBILE_URL = "https://maru-kra-final-clean.streamlit.app/?mode=mobile"
+CLOUD_PC_URL = "https://maru-kra-final-clean.streamlit.app/?mode=mobile/?mode=pc"
 KRA_BUY_URLS = {
     "서울": DERBYON_BUY_URL,
     "부산경남": DERBYON_BUY_URL,
@@ -3234,33 +3234,6 @@ def render_mobile_quick_view() -> None:
             mobile_race_no = st.number_input("경주", min_value=1, max_value=20, value=default_no, step=1, key="mobile_run_race_no")
         with mcol3:
             mobile_race_time = st.text_input("경주시간", value=default_time, placeholder="예: 14:30", key="mobile_run_race_time")
-    auto_race_time = st.sidebar.checkbox("현재 시간 기준 경주 자동선택", value=True, help="시간표/캐시가 있으면 현재 KST 기준 다음 경주를 자동으로 잡습니다.")  # SIDEBAR_AUTO_RACE_TIME_PICK
-    if auto_race_time:
-        _sched_sidebar = _load_schedule_for_sidebar(rc_date, meet)
-        _auto_race_no, _auto_time = _auto_pick_race_from_schedule(_sched_sidebar, meet)
-        if _auto_race_no:
-            race_no = int(_auto_race_no)
-            rc_time = _auto_time or locals().get("rc_time", "")
-            st.sidebar.success(f"자동선택: {meet} {race_no}경주 · {rc_time}")
-        else:
-            st.sidebar.info("시간표 데이터가 아직 없어 수동 경주번호를 사용합니다.")
-        st.caption("PC가 꺼져 있어도 Streamlit Cloud에서 API/캐시 분석 후 mobile_recommend.json을 저장합니다.")
-        r0, r1 = st.columns(2)
-        with r0:
-            if st.button("🔥 지금 허브분석 실행", type="primary", width="stretch"):
-                with st.spinner("모바일에서 허브분석 실행 중..."):
-                    ok, row, msg = run_mobile_hub_analysis(mobile_meet, _safe_race_no(mobile_race_no), str(mobile_race_time))
-                if ok:
-                    st.success(msg)
-                    st.rerun()
-                else:
-                    st.error(msg)
-        with r1:
-            if st.button("🔄 추천 확인", width="stretch"):
-                st.rerun()
-        st.link_button("↗ 더비온 공식 구매표 열기", kra_buy_url("서울"), width="stretch")
-        st.stop()
-
     latest = sync_row_to_current_race(ready.iloc[0].to_dict(), force_if_stale=True)
     # 실제 시간표가 현재 6R인데 mobile_recommend.json이 1R로 남는 문제를 여기서 최종 차단
     meet = str(latest.get("경마장", "서울"))
@@ -3984,6 +3957,11 @@ def _load_schedule_for_sidebar(rc_date: str, meet: str) -> pd.DataFrame:
         pass
     return pd.DataFrame()
 
+
+
+def _final_clean_mobile_url() -> str:
+    """모바일 전용 버튼은 항상 현재 final-clean 앱의 ?mode=mobile로 이동합니다."""
+    return "https://maru-kra-final-clean.streamlit.app/?mode=mobile"
 
 def render() -> None:
     # PC 기본 화면은 기존 그대로 유지합니다.
