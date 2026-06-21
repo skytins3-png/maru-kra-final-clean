@@ -11,7 +11,7 @@ MARU KRA FINAL ALL-IN-ONE APP - STABLE BET INTEGRATED
 """
 
 from __future__ import annotations
-import itertools
+
 import os
 import re
 import json
@@ -772,6 +772,7 @@ def render_18ticket_cards(latest: Dict[str, Any]) -> None:
 
 
 def build_3group_recommendation_from_score(score_df: pd.DataFrame) -> Dict[str, Any]:
+    from itertools import permutations  # HARD_FIX
     """점수표에서 3조합 삼쌍승 18장을 구성합니다."""
     if score_df is None or score_df.empty or "마번" not in score_df.columns:
         nums = [1, 2, 3, 4, 5, 6, 7]
@@ -784,7 +785,7 @@ def build_3group_recommendation_from_score(score_df: pd.DataFrame) -> Dict[str, 
     g3 = nums[-3:]
     tickets = []
     for g in [g1, g2, g3]:
-        tickets += ["-".join(map(str, p)) for p in itertools.permutations(g, 3)]
+        tickets += ["-".join(map(str, p)) for p in permutations(g, 3)]
     return {
         "공격삼쌍승": f"{g1[0]}→{g1[1]}→{g1[2]}",
         "방어삼복승": f"{g1[0]}-{g1[1]}-{g1[2]}",
