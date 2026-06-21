@@ -560,7 +560,7 @@ def _six_trifecta_orders(nums3: List[int], key: str = "stable") -> List[str]:
     """3마리 기준 삼쌍승 6개 순열."""
     nums = _unique_int_list(nums3)[:3]
     if len(nums) < 3:
-        nums = _unique_int_list(nums + [1,2,3])[:3]
+        nums = _unique_int_list(nums)[:3]  # NO_DEFAULT_FAKE_HORSES
     orders = list(permutations(nums, 3))
     # 안정형은 축마 1착을 먼저, 고배당은 구멍마 1착 가능성을 앞쪽, 변수형은 변동 후보를 앞쪽
     if key == "stable":
@@ -572,6 +572,7 @@ def _six_trifecta_orders(nums3: List[int], key: str = "stable") -> List[str]:
     return ["-".join(map(str, p)) for p in orders[:6]]
 
 def build_18ticket_purchase_plan(score_df: pd.DataFrame, result: Dict[str, Any] = None, total_budget: int = 18000) -> Dict[str, Any]:
+    active_nums = _active_horse_numbers_from_score_df(score_df)  # NON_STARTER_FILTER_18TICKET
     """추천 결과를 18마권 구매표로 변환합니다.
     자동구매가 아니라 더비온에 수동 입력하기 위한 복사표만 생성합니다.
     """
@@ -585,7 +586,9 @@ def build_18ticket_purchase_plan(score_df: pd.DataFrame, result: Dict[str, Any] 
     # 컬럼이 부족하면 종합순위 기반으로 자연스럽게 분산
     base = _top_nums_by_column(score_df, "종합점수")
     stable3 = _unique_int_list(stable_nums[:3] or base[:3])[:3]
+    stable3 = _filter_group_to_active(stable3, active_nums) if active_nums else stable3
     high3 = _unique_int_list((high_nums[:1] + base[:2] + high_nums[1:3]) or base[:4])[:3]
+    high3 = _filter_group_to_active(high3, active_nums) if active_nums else high3
     variable3 = _unique_int_list((variable_nums[:2] + base[:3]) or base[:4])[:3]
 
     stable6 = _six_trifecta_orders(stable3, "stable")
@@ -773,6 +776,51 @@ def render_18ticket_cards(latest: Dict[str, Any]) -> None:
         st.caption(f"18마권 표시 대기: {e}")
 
 
+
+def _active_horse_numbers_from_score_df(score_df: pd.DataFrame) -> List[int]:
+    """실제 출전/점수표에 존재하는 말번호만 추출합니다. 출전취소·비출전 말은 추천에서 제외합니다."""
+    if score_df is None or not isinstance(score_df, pd.DataFrame) or score_df.empty:
+        return []
+    number_cols = ["마번", "말번호", "horse_no", "hrNo", "chulNo", "번호", "gate", "Gate"]
+    status_cols = ["출전상태", "상태", "status", "rcStatus", "취소여부", "scratched"]
+    df = score_df.copy()
+    for sc in status_cols:
+        if sc in df.columns:
+            s = df[sc].astype(str).str.lower()
+            bad = s.str.contains("취소|제외|비출전|출전취소|scratch|scratched|cancel|withdraw|제외", na=False)
+            df = df[~bad]
+    col = next((c for c in number_cols if c in df.columns), None)
+    if col is None:
+        return []
+    nums = []
+    for v in df[col].tolist():
+        try:
+            n = int(float(str(v).strip()))
+            if 1 <= n <= 20 and n not in nums:
+                nums.append(n)
+        except Exception:
+            continue
+    return nums
+
+def _filter_group_to_active(group: List[int], active_nums: List[int]) -> List[int]:
+    """추천 그룹에서 실제 출전 말만 남기고 부족하면 active 말로 보충합니다."""
+    active_set = set(active_nums or [])
+    out = []
+    for x in group or []:
+        try:
+            n = int(float(str(x).strip()))
+            if n in active_set and n not in out:
+                out.append(n)
+        except Exception:
+            continue
+    for n in active_nums or []:
+        if n not in out:
+            out.append(n)
+        if len(out) >= 3:
+            break
+    return out[:3]
+
+
 def build_3group_recommendation_from_score(score_df: pd.DataFrame) -> Dict[str, Any]:
     from itertools import permutations  # GEMINI_LOCAL_IMPORT_BUILD3
     from itertools import permutations  # THREE_GROUP_HARD_FIX
@@ -787,8 +835,15 @@ def build_3group_recommendation_from_score(score_df: pd.DataFrame) -> Dict[str, 
     g1 = nums[:3]
     g2 = [nums[0], nums[3], nums[4]]
     g3 = nums[-3:]
+    active_nums = _active_horse_numbers_from_score_df(score_df)  # NON_STARTER_FILTER_BUILD3
+    if active_nums:
+        g1 = _filter_group_to_active(g1, active_nums)
+        g2 = _filter_group_to_active(g2, active_nums)
+        g3 = _filter_group_to_active(g3, active_nums)
     tickets = []
     for g in [g1, g2, g3]:
+        if len(g) < 3:  # NO_FAKE_HORSE_GROUP_GUARD
+            continue
         tickets += ["-".join(map(str, p)) for p in permutations(g, 3)]
     return {
         "공격삼쌍승": f"{g1[0]}→{g1[1]}→{g1[2]}",
@@ -1838,6 +1893,9 @@ def score_and_recommend(horses: pd.DataFrame, env: Dict[str, Any], sim_count: in
     # 세 그룹이 너무 겹치면 기존 상위 9마리로 보정
     if len({tuple(g) for g in triple_groups}) < 3:
         triple_groups = make_triple_groups_from_nums(all_nums)
+    active_nums = _active_horse_numbers_from_score_df(score_df)  # NON_STARTER_FILTER_SCORE_AND_RECOMMEND
+    if active_nums:
+        triple_groups = [_filter_group_to_active(g, active_nums) for g in triple_groups]
     triple_18 = expand_triple_18(triple_groups)
 
     axis = int(group1[0]); mate = int(group1[1]); sub = int(group1[2]); hole = int(group3[0])
@@ -3514,6 +3572,91 @@ def render_smart_collection_panel(rc_date: str, meet: str, race_no: int) -> None
 # -----------------------------------------------------------------------------
 # UI render
 # -----------------------------------------------------------------------------
+
+def _force_selected_race_context(row: Dict[str, Any], rc_date: str, meet: str, race_no: int) -> Dict[str, Any]:
+    """현재 선택한 경마장·경주번호로 추천 row를 강제 고정합니다."""
+    row = dict(row or {})
+    row["경마장"] = str(meet)
+    row["meet"] = str(meet)
+    row["경주번호"] = int(race_no)
+    row["race_no"] = int(race_no)
+    row["rc_date"] = str(rc_date)
+    row["기준일자"] = str(rc_date)
+    return row
+
+def _filter_schedule_selected_race(schedule_df: pd.DataFrame, meet: str, race_no: int) -> pd.DataFrame:
+    """시간표/허브 계획에서 현재 선택한 경주만 남깁니다."""
+    if schedule_df is None or not isinstance(schedule_df, pd.DataFrame) or schedule_df.empty:
+        return pd.DataFrame()
+    df = schedule_df.copy()
+    meet_cols = ["경마장", "meet", "MEET", "경주장", "장소"]
+    race_cols = ["경주번호", "race_no", "RACE_NO", "rcNo", "경주", "race"]
+    mcol = next((c for c in meet_cols if c in df.columns), None)
+    rcol = next((c for c in race_cols if c in df.columns), None)
+    if mcol is not None:
+        df = df[df[mcol].astype(str).str.contains(str(meet), na=False)]
+    if rcol is not None:
+        nums = pd.to_numeric(df[rcol], errors="coerce")
+        df = df[nums == int(race_no)]
+    return df.reset_index(drop=True)
+
+
+
+def _filter_data_selected_race(data: Dict[str, Any], rc_date: str, meet: str, race_no: int) -> Dict[str, Any]:
+    """API/캐시 data에서 현재 선택한 경마장·경주번호와 맞는 행만 남깁니다.
+    부산 4경주 선택 시 부산 2경주 캐시/시간표가 추천으로 섞이는 문제를 차단합니다.
+    """
+    if not isinstance(data, dict) or not data:
+        return data or {}
+    meet_cols = ["경마장", "meet", "MEET", "경주장", "장소"]
+    race_cols = ["경주번호", "race_no", "RACE_NO", "rcNo", "경주", "race"]
+    out = {}
+    for key, value in data.items():
+        try:
+            if isinstance(value, pd.DataFrame):
+                df = value.copy()
+            elif isinstance(value, list):
+                df = pd.DataFrame(value)
+            else:
+                out[key] = value
+                continue
+
+            if df.empty:
+                out[key] = df
+                continue
+
+            mcol = next((c for c in meet_cols if c in df.columns), None)
+            rcol = next((c for c in race_cols if c in df.columns), None)
+
+            if mcol is not None:
+                df = df[df[mcol].astype(str).str.contains(str(meet), na=False)]
+
+            if rcol is not None:
+                nums = pd.to_numeric(df[rcol], errors="coerce")
+                df = df[nums == int(race_no)]
+
+            out[key] = df.reset_index(drop=True)
+        except Exception:
+            out[key] = value
+    return out
+
+def _validate_selected_race_horses(score_df: pd.DataFrame, meet: str, race_no: int) -> pd.DataFrame:
+    """추천 직전 score_df도 현재 경주와 실제 출전마만 남깁니다."""
+    if score_df is None or not isinstance(score_df, pd.DataFrame) or score_df.empty:
+        return pd.DataFrame()
+    df = score_df.copy()
+    meet_cols = ["경마장", "meet", "MEET", "경주장", "장소"]
+    race_cols = ["경주번호", "race_no", "RACE_NO", "rcNo", "경주", "race"]
+    mcol = next((c for c in meet_cols if c in df.columns), None)
+    rcol = next((c for c in race_cols if c in df.columns), None)
+    if mcol is not None:
+        df = df[df[mcol].astype(str).str.contains(str(meet), na=False)]
+    if rcol is not None:
+        nums = pd.to_numeric(df[rcol], errors="coerce")
+        df = df[nums == int(race_no)]
+    return df.reset_index(drop=True)
+
+
 def render_live_panel(rc_date: str, meet: str, race_no: int, selected: List[str], sim_count: int, risk_mode: str) -> Tuple[pd.DataFrame, Dict[str, Any], List[Dict[str, Any]], Dict[str, pd.DataFrame], pd.DataFrame, Dict[str, Any]]:
     st.markdown("### 실시간 KRA 분석")
     if "live_data" not in st.session_state:
@@ -3539,10 +3682,13 @@ def render_live_panel(rc_date: str, meet: str, race_no: int, selected: List[str]
         st.session_state["api_status"] = pd.DataFrame([{"API":"초기화","상태":"첫 화면 빠른 로딩: API 자동호출 OFF · 버튼 클릭 시 수집","행수":sum(len(v) for v in cache.values()) if cache else 0}])
 
     data = st.session_state.get("live_data", {})
+    data = _filter_data_selected_race(data, rc_date, meet, int(race_no))  # SELECTED_RACE_DATAFLOW_FILTER
+    st.session_state["live_data"] = data
     status = st.session_state.get("api_status", pd.DataFrame())
     env = fetch_weather(meet)
     base = build_base_horses(data, rc_date, meet, int(race_no))
     horses = merge_score_features(base, data, rc_date, meet, int(race_no))
+    horses = _validate_selected_race_horses(horses, meet, int(race_no))  # SELECTED_RACE_SCOREDF_FILTER
     score_df, result, combos = score_and_recommend(horses, env, sim_count, risk_mode)
 
     live_rows = sum(len(v) for v in data.values()) if data else 0
@@ -3566,8 +3712,11 @@ def render_live_panel(rc_date: str, meet: str, race_no: int, selected: List[str]
             "분석모드": "PC 실시간 API 수집 자동저장", "모바일생성": "Y",
         }
         schedule_df = extract_schedule_from_data(data, rc_date, meet)
+        schedule_df = _filter_schedule_selected_race(schedule_df, meet, int(race_no))  # STRICT_SELECTED_RACE_SCHEDULE
+        auto_row = _force_selected_race_context(auto_row, rc_date, meet, int(race_no))  # STRICT_SELECTED_RACE_AUTO_ROW
         apply_mobile_plan_update(auto_row, score_df, schedule_df)
         auto_row = merge_18ticket_into_row(auto_row, score_df, int(auto_row.get("추천금액", 18000) or 18000))
+        auto_row = _force_selected_race_context(auto_row, rc_date, meet, int(race_no))  # STRICT_SELECTED_RACE_BEFORE_SAVE
         if save_shared_recommendation(auto_row):
             st.success("허브/mobile_recommend.json 자동 저장 완료 · 하루 경주시간표 기준 20분 전 모바일 추천도 생성했습니다.")
         else:
