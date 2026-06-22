@@ -2824,7 +2824,7 @@ def save_mobile_recommend_json(row: Dict[str, Any]) -> bool:
             "저장시각", "날짜", "경마장", "경주번호", "경주시간", "출발시간", "추천금액", "신뢰도", "위험도", "예상배당",
             "축마", "상대마", "보조마", "구멍마", "공격삼쌍승", "방어삼복승", "삼쌍승3묶음", "삼쌍승18조합",
             "추천창1", "추천창2", "추천창3", "추천유형1", "추천유형2", "추천유형3",
-            "18마권", "마권수", "단위금액", "총추천금액", "안정형6", "고배당형6", "변수대응형6", "안정형대표", "고배당형대표", "변수대응형대표", "구매표복사",
+            "18마권", "마권수", "단위금액", "총추천금액", "안정형6", "안정형근거", "변수형대표", "변수형6", "변수형근거", "고배당형6", "고배당형근거", "변수대응형6", "안정형대표", "고배당형대표", "변수대응형대표", "구매표복사",
             "안정점수", "변수점수", "고배당점수", "결과마번", "적중여부", "배당률", "환급금", "총환급", "손익", "순손익", "근거",
             "데이터상태", "실전검증", "실전표시불가", "실시간행수", "분석모드", "모바일생성", "API호출대상", "API상태행수"
         ]
@@ -2836,10 +2836,16 @@ def save_mobile_recommend_json(row: Dict[str, Any]) -> bool:
         small.setdefault("실전표시불가", "N" if live_rows > 0 else "Y")
         small["저장성공"] = "Y"
         small["저장파일"] = str(MOBILE_RECOMMEND_FILE)
+        small = _build_three_type_recommendation(small)  # THREE_TYPE_SAVE_APPLY
+        _save_three_type_hub_and_bigdata(small)
+        _save_five_agent_run(small)  # FIVE_AGENT_SAVE_APPLY
+        small = _mobile_compact_summary(small)  # MOBILE_COMPACT_SAVE
+        small["구매표복사"] = _compact_ticket_lines(small.get("구매표복사", ""), 22)
         mobile_text = json.dumps(small, ensure_ascii=False, indent=2)
         MOBILE_RECOMMEND_FILE.write_text(mobile_text, encoding="utf-8")
         try_push_hub_file_to_github("maru_kra_data/mobile_recommend.json", mobile_text, "Update mobile recommendation")
         external_ok = external_hub_save("mobile_recommend", small)  # EXTERNAL_HUB_SAVE_MOBILE_RECOMMEND
+        _save_current_race_status_to_external(small)  # MOBILE_PC_SYNC_SAVE_STATUS
         try:
             small["외부허브저장"] = "Y" if external_ok else "N"
             MOBILE_RECOMMEND_FILE.write_text(json.dumps(small, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -2853,21 +2859,85 @@ def save_mobile_recommend_json(row: Dict[str, Any]) -> bool:
             pass
         return False
 
-def load_mobile_recommend_json() -> Dict[str, Any]:
-    # EXTERNAL_HUB_LOAD_MOBILE_RECOMMEND: 외부 허브 우선, 실패 시 로컬 파일 fallback
+
+# MOBILE_PC_SYNC_STALE_FIX
+def _norm_text(v: Any) -> str:
     try:
-        hub_data = external_hub_load("mobile_recommend")
+        return str(v or "").strip()
+    except Exception:
+        return ""
+
+def _mobile_row_is_seoul1_stale(row: Dict[str, Any]) -> bool:
+    if not isinstance(row, dict) or not row:
+        return False
+    meet = _norm_text(row.get("경마장", ""))
+    race_no = _norm_text(row.get("경주번호", ""))
+    status = (_norm_text(row.get("데이터상태", "")) + " " + _norm_text(row.get("상태", ""))).strip()
+    return (meet in ["", "서울"]) and race_no in ["", "1", "1.0"] and (status == "" or any(x in status for x in ["대기", "샘플", "모바일 추천 데이터 없음"]))
+
+def _sanitize_mobile_loaded_row(row: Dict[str, Any]) -> Dict[str, Any]:
+    row = dict(row or {})
+    try:
+        ended = False
+        last_no = None
+        if "_end_of_day_kst_stop" in globals():
+            ended, last_no, last_time = _end_of_day_kst_stop(_norm_text(row.get("날짜", "")) or today_kst(), _norm_text(row.get("경마장", "서울")) or "서울")
+        else:
+            now = now_kst() if "now_kst" in globals() else datetime.datetime.now()
+            ended = now.hour >= 18
+        if ended and _mobile_row_is_seoul1_stale(row):
+            row["경마장"] = row.get("경마장", "서울") or "서울"
+            if last_no:
+                row["경주번호"] = int(last_no)
+            row["데이터상태"] = "경주종료"
+            row["상태"] = "오늘 경주 종료 · 서울 1경주 잔여 추천 표시 차단"
+            row["실전표시불가"] = "Y"
+            row["실전검증"] = "N"
+            row["삼쌍승18조합"] = ""
+            row["구매표복사"] = "[경주 종료]\n오늘 경주는 종료되었습니다.\n모바일에 남아 있던 서울 1경주 추천은 표시하지 않습니다.\nPC에서 새 경주 분석 후 다시 저장하세요."
+            return row
+    except Exception:
+        pass
+    try:
+        if "sync_row_to_current_race" in globals():
+            row = sync_row_to_current_race(row, force_if_stale=True)
+    except Exception:
+        pass
+    return row
+
+def _save_current_race_status_to_external(row: Dict[str, Any]) -> None:
+    try:
+        if "external_hub_save" in globals():
+            external_hub_save("current_race_status", {
+                "저장시각": now_str() if "now_str" in globals() else str(datetime.datetime.now()),
+                "날짜": row.get("날짜", today_kst() if "today_kst" in globals() else ""),
+                "경마장": row.get("경마장", ""),
+                "경주번호": row.get("경주번호", ""),
+                "경주시간": row.get("경주시간", row.get("출발시간", "")),
+                "데이터상태": row.get("데이터상태", ""),
+                "실시간행수": row.get("실시간행수", 0),
+            })
+    except Exception:
+        pass
+
+
+def load_mobile_recommend_json() -> Dict[str, Any]:
+    # MOBILE_PC_SYNC_SANITIZE_LOAD: 외부허브/로컬 모두 읽은 뒤 stale row 정리
+    try:
+        hub_data = external_hub_load("mobile_recommend") if "external_hub_load" in globals() else {}
         if isinstance(hub_data, dict) and hub_data:
-            return hub_data
+            return _sanitize_mobile_loaded_row(hub_data)  # MOBILE_PC_SYNC_SANITIZE_HUB
     except Exception:
         pass
     try:
         if MOBILE_RECOMMEND_FILE.exists():
             data = json.loads(MOBILE_RECOMMEND_FILE.read_text(encoding="utf-8"))
-            return data if isinstance(data, dict) else {}
+            return _sanitize_mobile_loaded_row(data) if isinstance(data, dict) else {}  # MOBILE_PC_SYNC_SANITIZE_LOCAL
     except Exception:
         pass
     return {}
+
+
 
 def save_shared_recommendation(row: Dict[str, Any]) -> bool:
     """모바일/PC가 같은 Streamlit 앱을 볼 때 같은 허브 파일에서 추천을 가져오게 저장합니다.
@@ -3324,6 +3394,439 @@ def _safe_first_mobile_row(ready: Any, fallback: Optional[Dict[str, Any]] = None
     return row
 
 
+
+# SCHEDULE_AUTO_5MIN_COMPACT_MOBILE_FIX
+# AUTO_REFRESH_CONTEXT_60S_VISUAL: 화면 갱신은 60초, 실제 API 수집은 경주일정 기준 5분 단위
+def _auto_collect_window_by_schedule(rc_date: str, meet: str, race_no: int) -> Tuple[bool, str, Optional[int]]:
+    """
+    한국시간 기준 경주일정 자동 수집창.
+    - 각 경주 시작 25분 전부터 시작
+    - 5분 단위 자동 수집/분석/허브 저장
+    - 경주 시작 후 20분까지 결과/배당 확인
+    - 마지막 경주 +20분 뒤 전체 수집 중단
+    """
+    try:
+        now = now_kst() if "now_kst" in globals() else datetime.datetime.now()
+    except Exception:
+        now = datetime.datetime.now()
+
+    try:
+        sched = _load_schedule_for_sidebar(rc_date, meet) if "_load_schedule_for_sidebar" in globals() else pd.DataFrame()
+    except Exception:
+        sched = pd.DataFrame()
+
+    # 시간표 없으면 무리하게 계속 수집하지 않음. 경마 시간대만 보수적으로 허용.
+    if sched is None or not isinstance(sched, pd.DataFrame) or sched.empty:
+        if 9 <= now.hour < 18:
+            # 시간표가 아직 없으면 5분 단위로만 허용
+            return (now.minute % 5 == 0), "시간표 없음 · 5분 단위 보수 자동", None
+        return False, "경주시간 외 · 자동수집 중단", None
+
+    df = sched.copy()
+    meet_cols = ["경마장", "meet", "MEET", "경주장", "장소"]
+    race_cols = ["경주번호", "race_no", "RACE_NO", "rcNo", "경주", "race"]
+    time_cols = ["경주예정시각", "예정시각", "출발시각", "경주시간", "race_time", "rcTime", "time", "출발시간"]
+
+    mcol = next((c for c in meet_cols if c in df.columns), None)
+    rcol = next((c for c in race_cols if c in df.columns), None)
+    tcol = next((c for c in time_cols if c in df.columns), None)
+
+    if mcol is not None:
+        df = df[df[mcol].astype(str).str.contains(str(meet), na=False)]
+    if rcol is None or tcol is None or df.empty:
+        return (9 <= now.hour < 18 and now.minute % 5 == 0), "시간표 컬럼 부족 · 5분 단위 보수 자동", None
+
+    df["_race_no_auto5"] = pd.to_numeric(df[rcol], errors="coerce")
+    if "_parse_hhmm_to_minutes" in globals():
+        df["_time_min_auto5"] = df[tcol].apply(_parse_hhmm_to_minutes)
+    else:
+        def _p(v):
+            s = str(v)
+            m = re.search(r"(\d{1,2})[:.](\d{2})", s)
+            if m:
+                return int(m.group(1))*60 + int(m.group(2))
+            return None
+        df["_time_min_auto5"] = df[tcol].apply(_p)
+
+    df = df.dropna(subset=["_race_no_auto5", "_time_min_auto5"])
+    if df.empty:
+        return (9 <= now.hour < 18 and now.minute % 5 == 0), "시간표 시간 파싱 실패 · 5분 단위 보수 자동", None
+
+    now_min = now.hour * 60 + now.minute
+    df = df.sort_values("_time_min_auto5")
+    last_row = df.iloc[-1]
+    last_min = int(last_row["_time_min_auto5"])
+    last_no = int(last_row["_race_no_auto5"])
+
+    # 마지막 경주 +20분 이후 완전 중단
+    if now_min > last_min + 20:
+        return False, f"오늘 {meet} 경주 종료 · 마지막 {last_no}경주 +20분 경과", last_no
+
+    # 현재 수집 대상: 선택 경주 우선, 범위 밖이면 시간상 가장 가까운 경주
+    cur = df[df["_race_no_auto5"].astype(int) == int(race_no)]
+    if cur.empty:
+        in_window = df[(df["_time_min_auto5"] - 25 <= now_min) & (now_min <= df["_time_min_auto5"] + 20)]
+        if not in_window.empty:
+            target = in_window.iloc[0]
+        else:
+            future = df[df["_time_min_auto5"] >= now_min]
+            target = future.iloc[0] if not future.empty else last_row
+    else:
+        target = cur.iloc[0]
+
+    target_no = int(target["_race_no_auto5"])
+    target_min = int(target["_time_min_auto5"])
+
+    # 경주별 수집창: -25 ~ +20
+    in_collect_window = (target_min - 25) <= now_min <= (target_min + 20)
+    five_min_tick = (now.minute % 5 == 0)
+
+    if in_collect_window and five_min_tick:
+        return True, f"{meet} {target_no}경주 자동수집창 · 출발 -25분~+20분 · 5분 단위", target_no
+    if in_collect_window:
+        return False, f"{meet} {target_no}경주 수집창 대기 · 다음 5분 단위까지 대기", target_no
+    return False, f"{meet} {target_no}경주 수집창 아님 · 출발 25분 전부터 자동", target_no
+
+
+
+# FIVE_AGENT_LEARNING_AI_FIX
+AGENT_ROLES = [
+    {
+        "id": "sun_agent",
+        "name": "해",
+        "title": "총괄 판단 에이전트",
+        "job": "한 경기의 전체 흐름을 종합해 안정형·변수형·고배당형 추천의 최종 균형을 잡음",
+        "specialty": "종합판단, 수익효율, 최종 추천 우선순위",
+        "risk": "과도한 몰빵 금지, 구매/결제는 수동",
+    },
+    {
+        "id": "moon_agent",
+        "name": "달",
+        "title": "일정·시간 감시 에이전트",
+        "job": "한국시간 기준 경주 시작 -25분부터 +20분까지 자동수집창을 판단하고 마지막 경주 +20분 후 중단",
+        "specialty": "KST 시간표, 경주 시작/종료, 서울1 찌꺼기 차단",
+        "risk": "경주 종료 후 불필요한 API 수집 금지",
+    },
+    {
+        "id": "star_agent",
+        "name": "별",
+        "title": "공식데이터 수집 에이전트",
+        "job": "KRA/공공데이터 승인 API에서 출전표·말·기수·결과·배당을 수집하고 허브에 정리",
+        "specialty": "공식 API, 허용 공개 URL 순찰, 출전표 검증, 결과/배당 저장",
+        "risk": "승인 API 우선, 무단 크롤링 금지",
+    },
+    {
+        "id": "cloud_agent",
+        "name": "구름",
+        "title": "변수 감지 에이전트",
+        "job": "체중변화·게이트·주로상태·날씨·기수변경·인기변화를 감지해 변수형 추천을 만듦",
+        "specialty": "변수형 6마권, 흐름 변화, 위험 신호",
+        "risk": "출전표 없는 말번호 추천 금지",
+    },
+    {
+        "id": "rain_agent",
+        "name": "비",
+        "title": "배당·학습 검증 에이전트",
+        "job": "배당흐름과 실제 결과를 비교해 learning_bigdata에 저장하고 다음 추천 가중치 보정",
+        "specialty": "고배당형 6마권, 기대값, 적중/실패 복기, 자기학습",
+        "risk": "적중 보장 표현 금지, 누적 데이터 기반 보정",
+    },
+]
+
+def _five_agent_empty_report() -> Dict[str, Any]:
+    return {
+        "에이전트수": 5,
+        "해": "대기 · 총괄 판단",
+        "달": "대기 · 일정/시간 감시",
+        "별": "대기 · 공식데이터 수집",
+        "구름": "대기 · 변수 감지",
+        "비": "대기 · 배당/학습 검증",
+        "전략": "수익효율 우선: 안정형6/변수형6/고배당형6 분리",
+    }
+
+def _run_five_agents(row: Dict[str, Any]) -> Dict[str, Any]:
+    row = dict(row or {})
+    report = _five_agent_empty_report()
+    try:
+        rc_date = str(row.get("날짜", today_kst() if "today_kst" in globals() else ""))
+        meet = str(row.get("경마장", "서울") or "서울")
+        race_no = int(float(row.get("경주번호", 1) or 1))
+        if "_auto_collect_window_by_schedule" in globals():
+            ok, reason, target_no = _auto_collect_window_by_schedule(rc_date, meet, race_no)
+            report["달"] = reason
+            if target_no:
+                row["경주번호"] = int(target_no)
+        else:
+            report["달"] = "한국시간 기준 대기"
+    except Exception as e:
+        report["달"] = f"점검필요: {e}"
+    try:
+        live_rows = int(float(row.get("실시간행수", row.get("출전두수", 0)) or 0))
+        report["별"] = f"수집행수 {live_rows} · 승인 API/허브 기준"
+    except Exception:
+        report["별"] = "공식 API/허브 기준"
+    try:
+        odds_text = str(row.get("예상배당", row.get("배당", "")) or "")
+        report["비"] = f"배당/인기 변화 추적 · {odds_text[:40]}"
+    except Exception:
+        report["비"] = "배당/인기 변화 추적"
+    try:
+        env = " / ".join([str(row.get(k, "")) for k in ["주로상태", "환경", "체중변화", "기수변경", "인기변화"] if str(row.get(k, "")).strip()])
+        report["구름"] = env[:80] if env else "체중·게이트·주로·기수·인기 변화 감시"
+    except Exception:
+        report["구름"] = "변수 감시"
+    try:
+        stat = _learning_summary_from_bigdata() if "_learning_summary_from_bigdata" in globals() else {"총기록": 0}
+        report["비"] = f"학습데이터 {stat.get('총기록',0)}건 · 결과 저장 후 가중치 보정"
+    except Exception:
+        report["비"] = "결과 누적 대기"
+    row["AI에이전트"] = report
+    row["AI에이전트요약"] = (
+        f"해:총괄 판단 | "
+        f"달:{report.get('달','')} | "
+        f"별:{report.get('별','')} | "
+        f"구름:{report.get('구름','')} | "
+        f"비:{report.get('비','')}"
+    )
+    row["투자전략"] = "해가 총괄, 달이 시간, 별이 공식데이터, 구름이 변수, 비가 배당/학습 담당 · 안정형6/변수형6/고배당형6 분산 · 구매/결제는 수동"
+    return row
+
+def _expected_profit_efficiency_note(row: Dict[str, Any]) -> str:
+    row = dict(row or {})
+    stable = row.get("안정형대표", "")
+    variable = row.get("변수형대표", "")
+    value = row.get("고배당형대표", "")
+    return (
+        f"효율전략: 안정형({stable})로 기본 방어, "
+        f"변수형({variable})으로 흐름 변화 대응, "
+        f"고배당형({value})은 소액 기대값 노림. "
+        "한 경기 몰빵보다 3분류 분산이 손실 관리에 유리합니다."
+    )
+
+
+# NAMED_AGENT_DISPLAY_FIX
+def _named_agent_summary_text() -> str:
+    lines = ["[5 AI 에이전트 전문업무]"]
+    for a in AGENT_ROLES:
+        lines.append(f"{a['name']} - {a['title']}: {a['specialty']}")
+    return "\n".join(lines)
+
+def _save_five_agent_run(row: Dict[str, Any]) -> None:
+    try:
+        row = _run_five_agents(row)
+        if "external_hub_save" in globals():
+            external_hub_save("agent_runs", {
+                "저장시각": now_str() if "now_str" in globals() else str(datetime.datetime.now()),
+                "날짜": row.get("날짜", ""),
+                "경마장": row.get("경마장", ""),
+                "경주번호": row.get("경주번호", ""),
+                "AI에이전트": row.get("AI에이전트", {}),
+                "AI에이전트요약": row.get("AI에이전트요약", ""),
+                "투자전략": row.get("투자전략", ""),
+            })
+    except Exception:
+        pass
+
+
+# THREE_TYPE_LEARNING_HUB_AI_FIX
+def _safe_json_loads(v: Any, default: Any = None) -> Any:
+    try:
+        if isinstance(v, (dict, list)):
+            return v
+        if v is None:
+            return default
+        return json.loads(str(v))
+    except Exception:
+        return default
+
+def _split_combo_text_to_list(v: Any) -> List[str]:
+    if isinstance(v, list):
+        raw = v
+    else:
+        raw = re.split(r"[/,\n]+", str(v or ""))
+    out = []
+    for x in raw:
+        nums = re.findall(r"\d+", str(x))
+        if len(nums) >= 3:
+            out.append("-".join(nums[:3]))
+    seen, final = set(), []
+    for c in out:
+        if c not in seen:
+            seen.add(c)
+            final.append(c)
+    return final
+
+def _combo_list_to_text(lst: List[str], limit: int = 6) -> str:
+    return " / ".join([str(x).strip() for x in lst if str(x).strip()][:limit])
+
+def _pick_combo_pool_from_row(row: Dict[str, Any]) -> List[str]:
+    pools = []
+    for k in ["삼쌍승18조합", "구매표복사", "추천조합", "combos", "조합", "안정형6", "변수형6", "변수대응형6", "고배당형6"]:
+        pools += _split_combo_text_to_list(row.get(k, ""))
+    seen, out = set(), []
+    for c in pools:
+        if c not in seen:
+            seen.add(c)
+            out.append(c)
+    return out
+
+def _build_three_type_recommendation(row: Dict[str, Any]) -> Dict[str, Any]:
+    row = dict(row or {})
+    combos = _pick_combo_pool_from_row(row)
+
+    stable = _split_combo_text_to_list(row.get("안정형6", "")) or _split_combo_text_to_list(row.get("안정형대표", ""))
+    variable = _split_combo_text_to_list(row.get("변수형6", "")) or _split_combo_text_to_list(row.get("변수대응형6", "")) or _split_combo_text_to_list(row.get("변수대응형대표", ""))
+    value = _split_combo_text_to_list(row.get("고배당형6", "")) or _split_combo_text_to_list(row.get("고배당형대표", ""))
+
+    if len(stable) < 6:
+        stable = (stable + combos[0:6])[:6]
+    if len(variable) < 6:
+        variable = (variable + combos[6:12] + combos[0:6])[:6]
+    if len(value) < 6:
+        value = (value + combos[12:18] + combos[6:12] + combos[0:6])[:6]
+
+    row["안정형대표"] = stable[0] if stable else ""
+    row["안정형6"] = _combo_list_to_text(stable, 6)
+    row["안정형근거"] = row.get("안정형근거", "최근폼·기수·주로 안정성 우선")
+
+    row["변수형대표"] = variable[0] if variable else ""
+    row["변수형6"] = _combo_list_to_text(variable, 6)
+    row["변수형근거"] = row.get("변수형근거", "체중변화·게이트·주로상태·인기변화 대응")
+
+    row["고배당형대표"] = value[0] if value else ""
+    row["고배당형6"] = _combo_list_to_text(value, 6)
+    row["고배당형근거"] = row.get("고배당형근거", "배당 대비 기대값·변수 터짐 가능성 우선")
+
+    all18 = []
+    for c in stable + variable + value:
+        if c and c not in all18:
+            all18.append(c)
+    row["삼쌍승18조합"] = _combo_list_to_text(all18, 18)
+    row["마권수"] = len(all18)
+    row["분류구조"] = "안정형6/변수형6/고배당형6"
+    row["구매방식"] = "수동입력/수동확정"
+    row["자동화모드"] = "Y"
+    row = _run_five_agents(row)  # FIVE_AGENT_THREE_TYPE_APPLY
+    row["수익효율메모"] = _expected_profit_efficiency_note(row)
+    return row
+
+def _three_type_mobile_ticket(row: Dict[str, Any]) -> str:
+    row = _build_three_type_recommendation(row)
+    lines = [
+        f"[{row.get('경마장','')} {row.get('경주번호','')}R] 3분류 추천",
+        "",
+        f"안정형 대표: {row.get('안정형대표','')}",
+        f"안정형 6: {row.get('안정형6','')}",
+        f"근거: {row.get('안정형근거','')}",
+        "",
+        f"변수형 대표: {row.get('변수형대표','')}",
+        f"변수형 6: {row.get('변수형6','')}",
+        f"근거: {row.get('변수형근거','')}",
+        "",
+        f"고배당형 대표: {row.get('고배당형대표','')}",
+        f"고배당형 6: {row.get('고배당형6','')}",
+        f"근거: {row.get('고배당형근거','')}",
+        "",
+        f"AI요약: {row.get('AI에이전트요약', '')[:140]}",
+        "담당: 해=총괄 / 달=시간 / 별=공식데이터 / 구름=변수 / 비=배당학습",  # NAMED_AGENT_MOBILE_DISPLAY
+        "",
+        "※ 구매/결제는 공식 사이트에서 수동 입력·수동 확정",  # FIVE_AGENT_MOBILE_TICKET
+    ]
+    return "\n".join(lines)
+
+def _learning_result_record(row: Dict[str, Any], result: Dict[str, Any] = None) -> Dict[str, Any]:
+    row = _build_three_type_recommendation(row)
+    result = dict(result or {})
+    return {
+        "저장시각": now_str() if "now_str" in globals() else str(datetime.datetime.now()),
+        "날짜": row.get("날짜", today_kst() if "today_kst" in globals() else ""),
+        "경마장": row.get("경마장", ""),
+        "경주번호": row.get("경주번호", ""),
+        "경주시간": row.get("경주시간", row.get("출발시간", "")),
+        "안정형대표": row.get("안정형대표", ""),
+        "안정형6": row.get("안정형6", ""),
+        "변수형대표": row.get("변수형대표", ""),
+        "변수형6": row.get("변수형6", ""),
+        "고배당형대표": row.get("고배당형대표", ""),
+        "고배당형6": row.get("고배당형6", ""),
+        "삼쌍승18조합": row.get("삼쌍승18조합", ""),
+        "실제결과": result.get("실제결과", row.get("실제결과", "")),
+        "적중분류": result.get("적중분류", row.get("적중분류", "")),
+        "배당결과": result.get("배당결과", row.get("배당결과", "")),
+        "환경": row.get("환경", row.get("주로상태", "")),
+        "기수변경": row.get("기수변경", ""),
+        "체중변화": row.get("체중변화", ""),
+        "인기변화": row.get("인기변화", ""),
+        "학습메모": result.get("학습메모", row.get("학습메모", "")),
+        "AI에이전트요약": row.get("AI에이전트요약", ""),
+        "투자전략": row.get("투자전략", ""),  # FIVE_AGENT_BIGDATA_FIELDS
+    }
+
+def _save_three_type_hub_and_bigdata(row: Dict[str, Any], result: Dict[str, Any] = None) -> None:
+    try:
+        row = _build_three_type_recommendation(row)
+        if "external_hub_save" in globals():
+            compact = _mobile_compact_summary(row) if "_mobile_compact_summary" in globals() else row
+            external_hub_save("mobile_recommend", compact)
+            external_hub_save("three_type_recommend", row)
+            external_hub_save("learning_bigdata", _learning_result_record(row, result))
+    except Exception:
+        pass
+
+def _load_learning_bigdata(limit: int = 200) -> List[Dict[str, Any]]:
+    try:
+        if "external_hub_load" in globals():
+            data = external_hub_load("learning_bigdata")
+            if isinstance(data, list):
+                return data[-limit:]
+            if isinstance(data, dict) and data:
+                return [data]
+    except Exception:
+        pass
+    return []
+
+def _learning_summary_from_bigdata() -> Dict[str, Any]:
+    rows = _load_learning_bigdata(500)
+    stat = {"총기록": len(rows), "안정형적중": 0, "변수형적중": 0, "고배당형적중": 0}
+    for r in rows:
+        hit = str(r.get("적중분류", ""))
+        if "안정" in hit:
+            stat["안정형적중"] += 1
+        if "변수" in hit:
+            stat["변수형적중"] += 1
+        if "고배당" in hit:
+            stat["고배당형적중"] += 1
+    return stat
+
+
+def _mobile_compact_summary(row: Dict[str, Any]) -> Dict[str, Any]:
+    """모바일은 5페이지처럼 길게 보이지 않게 핵심만 남깁니다."""
+    row = _build_three_type_recommendation(dict(row or {}))  # THREE_TYPE_MOBILE_COMPACT_APPLY
+    keep = [
+        "저장시각", "날짜", "경마장", "경주번호", "경주시간", "출발시간",
+        "데이터상태", "상태", "실전검증", "실전표시불가",
+        "안정형대표", "고배당형대표", "변수대응형대표",
+        "안정형6", "안정형근거", "변수형대표", "변수형6", "변수형근거", "고배당형6", "고배당형근거", "변수대응형6",
+        "삼쌍승18조합", "구매표복사", "총추천금액", "마권수", "단위금액",
+        "신뢰도", "위험도", "예상배당", "근거",
+        "자동화모드", "구매방식"
+    ]
+    compact = {k: row.get(k, "") for k in keep}
+    compact.setdefault("구매방식", "수동입력/수동확정")
+    compact.setdefault("자동화모드", "Y")
+    return compact
+
+def _compact_ticket_lines(text: Any, limit: int = 18) -> str:
+    """모바일 구매표 줄 수 제한. 너무 긴 설명/전체 원문을 잘라냄."""
+    s = str(text or "").strip()
+    if not s:
+        return ""
+    lines = [x for x in s.splitlines() if x.strip()]
+    if len(lines) <= limit:
+        return "\n".join(lines)
+    return "\n".join(lines[:limit]) + "\n... 이하 상세는 PC 화면에서 확인"
+
+
 def render_mobile_quick_view() -> None:
     """갤럭시 S26 Ultra 256GB 맞춤 모바일: 분석 앱 → 10초 수동구매 모드 → 공식 구매표 이동 흐름."""
     css()
@@ -3361,6 +3864,11 @@ def render_mobile_quick_view() -> None:
         with mcol3:
             mobile_race_time = st.text_input("경주시간", value=default_time, placeholder="예: 14:30", key="mobile_run_race_time")
     latest = sync_row_to_current_race(_safe_first_mobile_row(ready), force_if_stale=True)
+    latest = _sanitize_mobile_loaded_row(latest)  # MOBILE_PC_SYNC_RENDER_SANITIZE
+    latest = _mobile_compact_summary(latest)  # MOBILE_COMPACT_RENDER
+    latest = _build_three_type_recommendation(latest)  # THREE_TYPE_MOBILE_RENDER_APPLY
+    latest["구매표복사"] = _three_type_mobile_ticket(latest)
+    latest["구매표복사"] = _compact_ticket_lines(latest.get("구매표복사", ""), 22)
     # 실제 시간표가 현재 6R인데 mobile_recommend.json이 1R로 남는 문제를 여기서 최종 차단
     meet = str(latest.get("경마장", "서울"))
     race_no = _norm_race_no(latest.get("경주번호", "-"))
@@ -3824,6 +4332,749 @@ def _end_of_day_cache_status(meet: str, race_no: int) -> pd.DataFrame:
     }])
 
 
+
+
+# ALLOWED_WEB_PATROL_AGENT_FIX
+def _get_allowed_source_urls() -> List[str]:
+    """
+    허용된 공개 URL만 순찰합니다.
+    - 로그인 필요 사이트 금지
+    - 자동구매/자동결제 금지
+    - 차단 우회/캡차 우회/비공개 페이지 접근 금지
+    Streamlit Secrets 예:
+    PUBLIC_SOURCE_URLS = "https://example.com/page1,https://example.com/page2"
+    """
+    urls = []
+    try:
+        raw = ""
+        if hasattr(st, "secrets") and "PUBLIC_SOURCE_URLS" in st.secrets:
+            raw = str(st.secrets.get("PUBLIC_SOURCE_URLS", ""))
+        if raw:
+            for u in re.split(r"[,\n]+", raw):
+                u = str(u).strip()
+                if u.startswith("https://") or u.startswith("http://"):
+                    urls.append(u)
+    except Exception:
+        pass
+    return urls[:10]
+
+def _plain_text_from_html(html: str, limit: int = 6000) -> str:
+    s = str(html or "")
+    s = re.sub(r"(?is)<script.*?>.*?</script>", " ", s)
+    s = re.sub(r"(?is)<style.*?>.*?</style>", " ", s)
+    s = re.sub(r"(?is)<[^>]+>", " ", s)
+    s = re.sub(r"&nbsp;|&amp;|&lt;|&gt;", " ", s)
+    s = re.sub(r"\s+", " ", s).strip()
+    return s[:limit]
+
+def _extract_racing_signals(text: str) -> Dict[str, Any]:
+    """
+    공개 페이지 텍스트에서 경마 관련 신호만 요약.
+    실제 판단은 기존 공식 API/허브 데이터와 합쳐서 사용.
+    """
+    t = str(text or "")
+    keywords = {
+        "출전": len(re.findall(r"출전|출전표|출주", t)),
+        "기수": len(re.findall(r"기수|기승|변경", t)),
+        "주로": len(re.findall(r"주로|불량|다습|건조|포화|양호", t)),
+        "체중": len(re.findall(r"체중|증감|마체", t)),
+        "배당": len(re.findall(r"배당|인기|확정", t)),
+        "취소": len(re.findall(r"취소|제외|출전취소|경주취소", t)),
+    }
+    risk_words = []
+    for w in ["출전취소", "기수변경", "주로불량", "마체중", "배당", "인기", "취소", "제외"]:
+        if w in t:
+            risk_words.append(w)
+    return {
+        "키워드카운트": keywords,
+        "감지단어": list(dict.fromkeys(risk_words))[:20],
+        "요약": " / ".join([f"{k}:{v}" for k, v in keywords.items() if v > 0]) or "특이 신호 없음",
+    }
+
+def _allowed_web_patrol_once() -> Dict[str, Any]:
+    """
+    별 에이전트의 공개 사이트 순찰.
+    주의: 승인/허용된 공개 URL만. 로그인, 우회, 자동구매 없음.
+    """
+    result = {
+        "실행시각": now_str() if "now_str" in globals() else str(datetime.datetime.now()),
+        "상태": "대기",
+        "수집URL수": 0,
+        "성공": 0,
+        "실패": 0,
+        "신호": [],
+        "주의": "공개 허용 URL만 수집 · 로그인/우회/자동구매 금지",
+    }
+    urls = _get_allowed_source_urls()
+    result["수집URL수"] = len(urls)
+    if not urls:
+        result["상태"] = "PUBLIC_SOURCE_URLS 없음 · 공식 API/허브만 사용"
+        return result
+
+    try:
+        import requests
+    except Exception as e:
+        result["상태"] = f"requests 사용 불가: {e}"
+        return result
+
+    headers = {
+        "User-Agent": "MARU-KRA-Research-Agent/1.0 (public allowed sources only; no login; no purchase)"
+    }
+
+    for url in urls:
+        item = {"url": url, "상태": "대기", "요약": "", "신호": {}}
+        try:
+            r = requests.get(url, headers=headers, timeout=8)
+            if r.status_code != 200:
+                item["상태"] = f"HTTP {r.status_code}"
+                result["실패"] += 1
+            else:
+                text = _plain_text_from_html(r.text)
+                sig = _extract_racing_signals(text)
+                item["상태"] = "성공"
+                item["요약"] = sig.get("요약", "")
+                item["신호"] = sig
+                result["성공"] += 1
+        except Exception as e:
+            item["상태"] = f"실패: {str(e)[:80]}"
+            result["실패"] += 1
+        result["신호"].append(item)
+
+    result["상태"] = "완료"
+    return result
+
+def _save_web_patrol_to_hub(report: Dict[str, Any]) -> None:
+    try:
+        if "external_hub_save" in globals():
+            external_hub_save("web_patrol", report)
+    except Exception:
+        pass
+
+def _web_patrol_summary_text(report: Dict[str, Any]) -> str:
+    lines = [
+        "[별 · 공개 사이트 순찰]",
+        f"상태: {report.get('상태','')}",
+        f"URL수: {report.get('수집URL수',0)} / 성공: {report.get('성공',0)} / 실패: {report.get('실패',0)}",
+        f"주의: {report.get('주의','')}",
+        "",
+    ]
+    for item in report.get("신호", [])[:5]:
+        lines.append(f"- {item.get('url','')}")
+        lines.append(f"  상태: {item.get('상태','')}")
+        lines.append(f"  요약: {item.get('요약','')}")
+    if not report.get("신호"):
+        lines.append("등록된 공개 URL이 없습니다. Streamlit Secrets에 PUBLIC_SOURCE_URLS를 넣어야 합니다.")
+    return "\n".join(lines)
+
+def _auto_web_patrol_if_due() -> Dict[str, Any]:
+    """
+    자동 순찰은 5분 단위 수집창과 맞춰 가볍게 실행.
+    Streamlit 재실행 특성상 session_state로 중복 호출을 줄임.
+    """
+    try:
+        now = now_kst() if "now_kst" in globals() else datetime.datetime.now()
+        key = f"web_patrol_{now.strftime('%Y%m%d_%H%M')}"
+        if now.minute % 5 != 0:
+            return {}
+        if st.session_state.get(key):
+            return {}
+        st.session_state[key] = True
+        report = _allowed_web_patrol_once()
+        _save_web_patrol_to_hub(report)
+        return report
+    except Exception:
+        return {}
+
+
+
+
+# WEEKLY_HUB_AGENT_FRI7_APPLY_FIX
+def _weekday_kst() -> int:
+    try:
+        return (now_kst() if "now_kst" in globals() else datetime.datetime.now()).weekday()
+    except Exception:
+        return datetime.datetime.now().weekday()
+
+def _weekly_agent_phase() -> Dict[str, Any]:
+    """
+    월화수목: 허브에서 AI 에이전트 운영/누적
+    금요일 오전 7시 이후: 주간 학습결과를 적용 가능 상태로 전환
+    토일: 적용된 전략으로 경주일 운영
+    """
+    try:
+        now = now_kst() if "now_kst" in globals() else datetime.datetime.now()
+    except Exception:
+        now = datetime.datetime.now()
+    wd = now.weekday()  # 월0 화1 수2 목3 금4 토5 일6
+
+    if wd in [0, 1, 2, 3]:
+        return {"phase": "hub_train", "label": "월화수목 허브 운영", "apply_ready": False, "weekday": wd, "hour": now.hour}
+    if wd == 4 and now.hour < 7:
+        return {"phase": "fri_wait", "label": "금요일 07:00 적용 대기", "apply_ready": False, "weekday": wd, "hour": now.hour}
+    if wd == 4 and now.hour >= 7:
+        return {"phase": "fri_apply", "label": "금요일 07:00 이후 전략 적용", "apply_ready": True, "weekday": wd, "hour": now.hour}
+    return {"phase": "race_operate", "label": "주말 적용전략 운영", "apply_ready": True, "weekday": wd, "hour": now.hour}
+
+def _weekly_agent_base_plan() -> Dict[str, Any]:
+    return {
+        "저장시각": now_str() if "now_str" in globals() else str(datetime.datetime.now()),
+        "주간모드": _weekly_agent_phase(),
+        "운영원칙": "월화수목 허브 학습/수집 · 금요일 07:00 전략 적용 · 토일 경주 운영",
+        "해": "주간 누적 데이터 총괄 판단",
+        "달": "금요일 07:00 적용시각 감시",
+        "별": "공식 API/공개URL 수집상태 누적",
+        "구름": "변수 패턴 누적",
+        "비": "배당/결과/learning_bigdata 기반 가중치 제안",
+        "적용상태": "대기",
+        "추천가중치": {"안정형": 1.0, "변수형": 1.0, "고배당형": 1.0},
+    }
+
+def _weekly_hub_agent_train_once() -> Dict[str, Any]:
+    """
+    월화수목 허브 운영:
+    - 통신상태 저장
+    - 웹 순찰 가능 시 저장
+    - 수익효율 학습요약 저장
+    - 코드개선 제안 저장
+    """
+    phase = _weekly_agent_phase()
+    plan = _weekly_agent_base_plan()
+    plan["적용상태"] = "허브운영중" if phase["phase"] == "hub_train" else "대기"
+
+    try:
+        comm = _comm_status_snapshot() if "_comm_status_snapshot" in globals() else {}
+        plan["통신상태"] = comm
+    except Exception as e:
+        plan["통신상태"] = {"오류": str(e)[:120]}
+
+    try:
+        eff = _profit_efficiency_learning() if "_profit_efficiency_learning" in globals() else {}
+        plan["추천가중치"] = eff.get("추천가중치", plan["추천가중치"]) if isinstance(eff, dict) else plan["추천가중치"]
+        plan["수익효율"] = eff
+    except Exception as e:
+        plan["수익효율"] = {"오류": str(e)[:120]}
+
+    try:
+        if "_auto_web_patrol_if_due" in globals():
+            patrol = _auto_web_patrol_if_due()
+            if patrol:
+                plan["웹순찰"] = patrol
+    except Exception:
+        pass
+
+    try:
+        code_sug = _code_improvement_suggestions() if "_code_improvement_suggestions" in globals() else {}
+        plan["코드개선제안"] = code_sug
+    except Exception:
+        pass
+
+    try:
+        if "external_hub_save" in globals():
+            external_hub_save("weekly_agent_plan", plan)
+            external_hub_save("weekly_agent_runs", {
+                "저장시각": plan.get("저장시각", ""),
+                "주간모드": phase,
+                "요약": "월화수목 허브 운영/누적",
+                "추천가중치": plan.get("추천가중치", {}),
+            })
+    except Exception:
+        pass
+    return plan
+
+def _weekly_agent_apply_if_due() -> Dict[str, Any]:
+    """
+    금요일 오전 7시 이후 자동 적용:
+    - weekly_agent_plan을 읽어 적용 상태로 저장
+    - 추천가중치를 active_strategy에 저장
+    - 자동 코드 배포는 하지 않음. 앱 내부 전략값만 적용.
+    """
+    phase = _weekly_agent_phase()
+    result = {
+        "실행시각": now_str() if "now_str" in globals() else str(datetime.datetime.now()),
+        "주간모드": phase,
+        "적용됨": False,
+        "메모": "",
+    }
+
+    if not phase.get("apply_ready"):
+        result["메모"] = phase.get("label", "적용 대기")
+        return result
+
+    try:
+        plan = external_hub_load("weekly_agent_plan") if "external_hub_load" in globals() else {}
+        if not isinstance(plan, dict) or not plan:
+            plan = _weekly_hub_agent_train_once()
+        weights = plan.get("추천가중치", {"안정형": 1.0, "변수형": 1.0, "고배당형": 1.0})
+        active = {
+            "적용시각": result["실행시각"],
+            "적용요일": "금요일 07:00 이후" if phase.get("phase") == "fri_apply" else "주말 운영",
+            "추천가중치": weights,
+            "주간계획": plan,
+            "주의": "자동구매/자동결제/자동배포 없음 · 추천전략만 앱 내부 적용",
+        }
+        result["적용됨"] = True
+        result["메모"] = "weekly_agent_plan → active_strategy 적용"
+        result["active_strategy"] = active
+        if "external_hub_save" in globals():
+            external_hub_save("active_strategy", active)
+            external_hub_save("weekly_apply_log", result)
+    except Exception as e:
+        result["메모"] = f"적용 오류: {str(e)[:150]}"
+    return result
+
+def _weekly_agent_tick() -> Dict[str, Any]:
+    """
+    화면 실행 시 가벼운 주간 에이전트 틱.
+    월화수목에는 허브 운영, 금요일 7시 이후에는 적용.
+    중복 실행은 session_state로 같은 시간대 반복을 줄임.
+    """
+    try:
+        now = now_kst() if "now_kst" in globals() else datetime.datetime.now()
+        phase = _weekly_agent_phase()
+        # 월화수목은 매시 1회, 금요일 적용은 7시 이후 매시 1회 체크
+        key = f"weekly_agent_{now.strftime('%Y%m%d_%H')}_{phase.get('phase')}"
+        if st.session_state.get(key):
+            return {"주간모드": phase, "중복방지": True}
+        st.session_state[key] = True
+
+        if phase.get("phase") == "hub_train":
+            return _weekly_hub_agent_train_once()
+        if phase.get("apply_ready"):
+            return _weekly_agent_apply_if_due()
+        return {"주간모드": phase, "메모": "대기"}
+    except Exception as e:
+        return {"오류": str(e)[:150]}
+
+def _weekly_agent_status_text() -> str:
+    phase = _weekly_agent_phase()
+    lines = [
+        "[주간 AI 에이전트 운영]",
+        "월화수목: 허브에서 해·달·별·구름·비 운영/누적",
+        "금요일 07:00: 주간 학습전략 적용",
+        "토일: 적용전략으로 경주 운영",
+        "",
+        f"현재상태: {phase.get('label')}",
+    ]
+    try:
+        active = external_hub_load("active_strategy") if "external_hub_load" in globals() else {}
+        if isinstance(active, dict) and active:
+            lines.append(f"활성전략 적용시각: {active.get('적용시각','')}")
+            lines.append(f"추천가중치: {active.get('추천가중치',{})}")
+    except Exception:
+        pass
+    return "\n".join(lines)
+
+def render_weekly_agent_center() -> None:
+    try:
+        st.markdown("### 🗓️ 주간 AI 에이전트 운영")
+        st.caption("월화수목은 허브에서 운영/누적, 금요일 오전 7시에 전략 적용합니다.")
+        tick = _weekly_agent_tick()
+        with st.expander("주간 운영 상태", expanded=False):
+            st.text(_weekly_agent_status_text())
+            st.json(tick)
+        c1, c2, c3 = st.columns(3)
+        if c1.button("월화수목 허브운영 즉시 실행"):
+            st.json(_weekly_hub_agent_train_once())
+        if c2.button("금요일 07시 전략 적용 확인"):
+            st.json(_weekly_agent_apply_if_due())
+        if c3.button("active_strategy 보기"):
+            try:
+                st.json(external_hub_load("active_strategy") if "external_hub_load" in globals() else {})
+            except Exception as e:
+                st.warning(str(e))
+    except Exception as e:
+        st.warning(f"주간 AI 에이전트 표시 오류: {e}")
+
+
+# SELF_LEARNING_CONTROL_CENTER_FIX
+def _self_learning_governance() -> Dict[str, Any]:
+    """
+    목적:
+    - 스스로 학습: 결과/로그/통신상태를 저장하고 다음 판단에 반영
+    - 코드개선: 오류 패턴을 분석해 '패치 제안'을 생성
+    - 통신 안정화: API/허브/모바일 동기화 상태 점검
+    - 수익효율: 안정형/변수형/고배당형 결과 누적으로 가중치 보정
+    원칙:
+    - 자동구매/자동결제 금지
+    - 자동 GitHub 배포 금지
+    - 코드 수정은 제안까지만, 최종 적용은 사람이 확인
+    """
+    return {
+        "자동구매": "금지",
+        "자동결제": "금지",
+        "자동배포": "금지",
+        "코드수정": "AI 제안 생성 → 사람 확인 후 적용",
+        "데이터학습": "learning_bigdata/agent_runs/web_patrol/comm_status 기반",
+        "목표": "통신 안정화 + 분석 품질 개선 + 수익효율 보정",
+    }
+
+def _comm_status_snapshot() -> Dict[str, Any]:
+    """API/허브/모바일/PC 통신 안정성 점검."""
+    snap = {
+        "저장시각": now_str() if "now_str" in globals() else str(datetime.datetime.now()),
+        "GoogleSheet허브": "대기",
+        "모바일추천": "대기",
+        "3분류추천": "대기",
+        "학습데이터": "대기",
+        "웹순찰": "대기",
+        "권장조치": [],
+    }
+    try:
+        if "external_hub_load" in globals():
+            mobile = external_hub_load("mobile_recommend")
+            three = external_hub_load("three_type_recommend")
+            learn = external_hub_load("learning_bigdata")
+            patrol = external_hub_load("web_patrol")
+            snap["GoogleSheet허브"] = "연결됨"
+            snap["모바일추천"] = "있음" if isinstance(mobile, dict) and mobile else "비어있음"
+            snap["3분류추천"] = "있음" if isinstance(three, dict) and three else "비어있음"
+            snap["학습데이터"] = "있음" if learn else "비어있음"
+            snap["웹순찰"] = "있음" if patrol else "비어있음"
+        else:
+            snap["GoogleSheet허브"] = "외부허브 함수 없음"
+    except Exception as e:
+        snap["GoogleSheet허브"] = f"오류: {str(e)[:120]}"
+        snap["권장조치"].append("Streamlit Secrets의 GOOGLE_SCRIPT_URL / GOOGLE_SCRIPT_TOKEN 확인")
+
+    if snap["모바일추천"] == "비어있음":
+        snap["권장조치"].append("PC에서 현재 경주 3분류 추천 저장 필요")
+    if snap["학습데이터"] == "비어있음":
+        snap["권장조치"].append("실제 결과 저장이 누적되어야 자기학습 가능")
+    if snap["웹순찰"] == "비어있음":
+        snap["권장조치"].append("PUBLIC_SOURCE_URLS 공개 URL 등록 시 별 에이전트 순찰 가능")
+    return snap
+
+def _save_comm_status_snapshot() -> None:
+    try:
+        snap = _comm_status_snapshot()
+        if "external_hub_save" in globals():
+            external_hub_save("comm_status", snap)
+    except Exception:
+        pass
+
+def _profit_efficiency_learning() -> Dict[str, Any]:
+    """learning_bigdata 기반 수익효율 보정 요약."""
+    try:
+        rows = _load_learning_bigdata(500) if "_load_learning_bigdata" in globals() else []
+    except Exception:
+        rows = []
+    stat = {
+        "총기록": len(rows),
+        "추천가중치": {"안정형": 1.0, "변수형": 1.0, "고배당형": 1.0},
+        "메모": "실제결과가 누적되면 분류별 가중치를 보정합니다.",
+    }
+    if not rows:
+        return stat
+
+    hit = {"안정형": 0, "변수형": 0, "고배당형": 0}
+    for r in rows:
+        s = str(r.get("적중분류", ""))
+        if "안정" in s:
+            hit["안정형"] += 1
+        if "변수" in s:
+            hit["변수형"] += 1
+        if "고배당" in s:
+            hit["고배당형"] += 1
+
+    total_hit = max(sum(hit.values()), 1)
+    for k in hit:
+        # 데이터가 적을 땐 과보정하지 않게 0.85~1.25 범위
+        ratio = hit[k] / total_hit
+        stat["추천가중치"][k] = round(max(0.85, min(1.25, 0.85 + ratio * 1.2)), 3)
+    stat["메모"] = f"누적 적중: 안정 {hit['안정형']} / 변수 {hit['변수형']} / 고배당 {hit['고배당형']}"
+    return stat
+
+def _code_improvement_suggestions(log_text: str = "") -> Dict[str, Any]:
+    """오류 로그/운영 상태 기반 코드개선 제안. 실제 코드는 자동 적용하지 않음."""
+    text = str(log_text or "")
+    suggestions = []
+    patterns = {
+        "NameError": "변수 스코프/함수 인자명 통일 필요",
+        "IndexError": "빈 DataFrame/빈 리스트 방어 필요",
+        "KeyError": "컬럼 존재 확인 및 기본값 처리 필요",
+        "HTTP 500": "API endpoint/serviceKey/date 파라미터와 재시도/캐시 처리 필요",
+        "timeout": "API 호출 timeout 분리와 성공 캐시 우선 사용 필요",
+        "JSONDecodeError": "응답 포맷 XML/JSON 자동 판별 필요",
+        "Permission": "Google Sheet Apps Script 권한/배포 URL 확인 필요",
+    }
+    for p, msg in patterns.items():
+        if p.lower() in text.lower():
+            suggestions.append(msg)
+
+    if not suggestions:
+        suggestions = [
+            "경주별 -25분~+20분 5분 수집창 유지",
+            "성공 API 응답은 캐시에 저장하고 실패 API는 다음 tick까지 재시도 제한",
+            "모바일은 3분류 핵심만 표시하고 상세는 PC로 분리",
+            "결과 저장 후 안정형/변수형/고배당형 적중분류를 반드시 기록",
+        ]
+
+    out = {
+        "생성시각": now_str() if "now_str" in globals() else str(datetime.datetime.now()),
+        "패치방식": "제안만 생성 · 자동배포 금지",
+        "제안": suggestions,
+        "다음단계": "사람이 확인 후 app.py 반영",
+    }
+    try:
+        if "external_hub_save" in globals():
+            external_hub_save("code_suggestions", out)
+    except Exception:
+        pass
+    return out
+
+def _self_learning_status_text() -> str:
+    gov = _self_learning_governance()
+    comm = _comm_status_snapshot()
+    eff = _profit_efficiency_learning()
+    lines = [
+        "[자가학습/운영센터]",
+        f"목표: {gov.get('목표')}",
+        f"코드수정: {gov.get('코드수정')}",
+        f"자동배포: {gov.get('자동배포')}",
+        f"구매/결제: 자동구매 {gov.get('자동구매')} / 자동결제 {gov.get('자동결제')}",
+        "",
+        "[통신상태]",
+        f"허브: {comm.get('GoogleSheet허브')}",
+        f"모바일추천: {comm.get('모바일추천')}",
+        f"3분류추천: {comm.get('3분류추천')}",
+        f"학습데이터: {comm.get('학습데이터')}",
+        "",
+        "[수익효율 학습]",
+        f"총기록: {eff.get('총기록')}",
+        f"가중치: {eff.get('추천가중치')}",
+        f"메모: {eff.get('메모')}",
+    ]
+    if comm.get("권장조치"):
+        lines.append("")
+        lines.append("[권장조치]")
+        for x in comm.get("권장조치", []):
+            lines.append(f"- {x}")
+    return "\n".join(lines)
+
+def render_self_learning_control_center() -> None:
+    """PC 전용 자가학습/코드개선/통신안정화 센터."""
+    try:
+        st.markdown("### 🧠 자가학습 운영센터")
+        st.caption("스스로 데이터는 누적하지만, 코드 적용/배포와 구매/결제는 사람 확인이 필요합니다.")
+        c1, c2, c3 = st.columns(3)
+        if c1.button("통신점검 저장"):
+            _save_comm_status_snapshot()
+            st.success("comm_status 저장 완료")
+        if c2.button("수익효율 학습요약"):
+            st.json(_profit_efficiency_learning())
+        if c3.button("코드개선 제안"):
+            st.json(_code_improvement_suggestions())
+        with st.expander("자가학습 상태 보기", expanded=False):
+            st.text(_self_learning_status_text())
+        with st.expander("로그 붙여넣고 코드개선 제안 받기", expanded=False):
+            log_text = st.text_area("오류 로그/Streamlit 로그", height=180, key="self_learning_log_text")
+            if st.button("로그 분석 후 제안 저장"):
+                st.json(_code_improvement_suggestions(log_text))
+    except Exception as e:
+        st.warning(f"자가학습 운영센터 표시 오류: {e}")
+
+
+# PC_COMMAND_INPUT_CONSOLE_FIX
+COMMAND_EXAMPLES = [
+    "해 상태",
+    "달 자동수집 상태",
+    "별 공식API 상태",
+    "사이트수집",
+    "웹 순찰",
+    "구름 변수 체크",
+    "비 학습요약",
+    "3분류 추천 보여줘",
+    "모바일 주소",
+    "허브 저장 상태",
+    "자가학습",
+    "통신점검",
+    "코드진단",
+    "수익효율",
+    "주간운영",
+    "금요일적용",
+    "월화수목",
+    "오늘 종료 상태",
+    "서울 9경주",
+]
+
+def _pc_command_parse(cmd: str) -> Dict[str, Any]:
+    s = str(cmd or "").strip()
+    out = {"raw": s, "action": "help", "meet": "", "race_no": None}
+    if not s:
+        return out
+
+    nums = re.findall(r"(\d+)\s*경주|\b(\d+)\s*R\b", s, flags=re.IGNORECASE)
+    if nums:
+        n = next((a or b for a, b in nums if (a or b)), None)
+        if n:
+            try:
+                out["race_no"] = int(n)
+            except Exception:
+                pass
+
+    for meet in ["서울", "부산", "제주"]:
+        if meet in s:
+            out["meet"] = meet
+
+    if any(x in s for x in ["해", "총괄", "전략"]):
+        out["action"] = "sun"
+    elif any(x in s for x in ["달", "시간", "일정", "자동수집", "종료"]):
+        out["action"] = "moon"
+    elif any(x in s for x in ["사이트수집", "사이트 순찰", "웹수집", "웹 순찰", "돌아", "순찰"]):
+        out["action"] = "web_patrol"  # WEB_PATROL_COMMAND_PARSE
+    elif any(x in s for x in ["별", "공식", "API", "api", "출전표"]):
+        out["action"] = "star"
+    elif any(x in s for x in ["구름", "변수", "체중", "게이트", "주로", "날씨", "기수"]):
+        out["action"] = "cloud"
+    elif any(x in s for x in ["비", "학습", "빅데이터", "결과", "배당"]):
+        out["action"] = "rain"
+    elif any(x in s for x in ["추천", "3분류", "안정", "고배당"]):
+        out["action"] = "recommend"
+    elif any(x in s for x in ["모바일", "주소", "링크"]):
+        out["action"] = "mobile_link"
+    elif any(x in s for x in ["주간운영", "금요일적용", "월화수목", "주간 AI", "주간에이전트"]):
+        out["action"] = "weekly_agent"  # WEEKLY_AGENT_COMMAND_PARSE
+    elif any(x in s for x in ["자가학습", "운영센터", "통신점검", "코드진단", "수익효율", "코드개선"]):
+        out["action"] = "self_learning"  # SELF_LEARNING_COMMAND_PARSE
+    elif any(x in s for x in ["허브", "저장", "구글", "시트"]):
+        out["action"] = "hub"
+    return out
+
+def _pc_command_execute(cmd: str, current_row: Dict[str, Any] = None) -> str:
+    parsed = _pc_command_parse(cmd)
+    row = dict(current_row or {})
+    action = parsed.get("action", "help")
+
+    if parsed.get("meet"):
+        row["경마장"] = parsed["meet"]
+    if parsed.get("race_no"):
+        row["경주번호"] = parsed["race_no"]
+
+    try:
+        if "_build_three_type_recommendation" in globals():
+            row = _build_three_type_recommendation(row)
+    except Exception:
+        pass
+
+    if action == "sun":
+        return (
+            "[해 · 총괄 판단]\\n"
+            "안정형/변수형/고배당형의 균형을 잡습니다.\\n"
+            f"현재 전략: {row.get('투자전략', '3분류 분산 · 구매/결제 수동')}\\n"
+            f"수익효율: {row.get('수익효율메모', '')}"
+        )
+
+    if action == "moon":
+        try:
+            rc_date = str(row.get("날짜", today_kst() if "today_kst" in globals() else ""))
+            meet = str(row.get("경마장", "서울") or "서울")
+            race_no = int(float(row.get("경주번호", 1) or 1))
+            if "_auto_collect_window_by_schedule" in globals():
+                ok, reason, target_no = _auto_collect_window_by_schedule(rc_date, meet, race_no)
+                return f"[달 · 일정/시간]\\n자동수집 허용: {ok}\\n상태: {reason}\\n대상경주: {target_no or race_no}"
+        except Exception as e:
+            return f"[달 · 일정/시간]\\n점검 필요: {e}"
+        return "[달 · 일정/시간]\\n한국시간 기준 경주 -25분~+20분, 5분 단위 자동수집입니다."
+
+    if action == "web_patrol":
+        report = _allowed_web_patrol_once()
+        _save_web_patrol_to_hub(report)
+        return _web_patrol_summary_text(report)  # WEB_PATROL_COMMAND_EXECUTE
+
+    if action == "star":
+        return (
+            "[별 · 공식데이터]\\n"
+            "KRA/공공데이터 승인 API와 Google Sheet 허브 기준으로 출전표·말·기수·배당·결과를 확인합니다.\\n"
+            f"실시간행수: {row.get('실시간행수', row.get('출전두수', '대기'))}\\n"
+            "원칙: 승인 API 우선, 무단 크롤링 금지\n명령: 사이트수집 / 웹 순찰"  # WEB_PATROL_STAR_TEXT
+        )
+
+    if action == "cloud":
+        return (
+            "[구름 · 변수감지]\\n"
+            "체중변화·게이트·주로상태·날씨·기수변경·인기변화를 확인해 변수형 추천을 담당합니다.\\n"
+            f"변수형 대표: {row.get('변수형대표', '')}\\n"
+            f"변수형 6: {row.get('변수형6', '')}\\n"
+            f"근거: {row.get('변수형근거', '')}"
+        )
+
+    if action == "rain":
+        try:
+            stat = _learning_summary_from_bigdata() if "_learning_summary_from_bigdata" in globals() else {"총기록": 0}
+        except Exception:
+            stat = {"총기록": 0}
+        return (
+            "[비 · 배당/학습]\\n"
+            f"학습데이터: {stat.get('총기록', 0)}건\\n"
+            f"안정형 적중: {stat.get('안정형적중', 0)} / 변수형 적중: {stat.get('변수형적중', 0)} / 고배당형 적중: {stat.get('고배당형적중', 0)}\\n"
+            f"고배당형 대표: {row.get('고배당형대표', '')}\\n"
+            f"고배당형 6: {row.get('고배당형6', '')}"
+        )
+
+    if action == "recommend":
+        return (
+            "[3분류 추천]\\n"
+            f"안정형 대표: {row.get('안정형대표', '')}\\n"
+            f"안정형 6: {row.get('안정형6', '')}\\n\\n"
+            f"변수형 대표: {row.get('변수형대표', '')}\\n"
+            f"변수형 6: {row.get('변수형6', '')}\\n\\n"
+            f"고배당형 대표: {row.get('고배당형대표', '')}\\n"
+            f"고배당형 6: {row.get('고배당형6', '')}\\n\\n"
+            f"총 18마권: {row.get('삼쌍승18조합', '')}"
+        )
+
+    if action == "mobile_link":
+        return (
+            "[모바일 주소]\\n"
+            "https://maru-kra-final-clean.streamlit.app/?mode=mobile\\n"
+            "캐시 새로고침: https://maru-kra-final-clean.streamlit.app/?mode=mobile&v=cmd"
+        )
+
+    if action == "weekly_agent":
+        tick = _weekly_agent_tick()
+        return _weekly_agent_status_text() + "\n\n" + json.dumps(tick, ensure_ascii=False, indent=2)  # WEEKLY_AGENT_COMMAND_EXECUTE
+
+    if action == "self_learning":
+        _save_comm_status_snapshot()
+        return _self_learning_status_text()  # SELF_LEARNING_COMMAND_EXECUTE
+
+    if action == "hub":
+        try:
+            data = external_hub_load("mobile_recommend") if "external_hub_load" in globals() else {}
+            status = "연결됨" if isinstance(data, dict) and data else "대기/비어있음"
+        except Exception as e:
+            status = f"점검필요: {e}"
+        return (
+            "[허브 저장 상태]\\n"
+            f"Google Sheet 허브: {status}\\n"
+            "저장 종류: mobile_recommend / three_type_recommend / learning_bigdata / agent_runs"
+        )
+
+    return (
+        "[명령 입력창 도움말]\\n"
+        "예시 명령:\\n- " + "\\n- ".join(COMMAND_EXAMPLES) + "\\n\\n"
+        "명령은 PC에서 빠르게 상태를 확인하는 용도입니다. 구매/결제는 수동입니다."
+    )
+
+def render_pc_command_console(current_row: Dict[str, Any] = None) -> None:
+    """PC 전용 명령 입력창."""
+    try:
+        auto_patrol = _auto_web_patrol_if_due()  # WEB_PATROL_AUTO_RENDER
+        st.markdown("### 🧭 PC 명령 입력창")
+        st.caption("예: 해 상태 / 달 자동수집 상태 / 3분류 추천 보여줘 / 비 학습요약 / 모바일 주소")
+        with st.form("maru_pc_command_form", clear_on_submit=False):
+            cmd = st.text_input("명령 입력", value=st.session_state.get("last_pc_command", ""), placeholder="예: 3분류 추천 보여줘")
+            run_cmd = st.form_submit_button("명령 실행")
+        if run_cmd:
+            st.session_state["last_pc_command"] = cmd
+            st.session_state["last_pc_command_result"] = _pc_command_execute(cmd, current_row or {})
+        result = st.session_state.get("last_pc_command_result", "")
+        if result:
+            st.text_area("명령 결과", value=result, height=260)
+    except Exception as e:
+        st.warning(f"명령 입력창 표시 오류: {e}")
+
+
 def render_live_panel(rc_date: str, meet: str, race_no: int, selected: List[str], sim_count: int, risk_mode: str) -> Tuple[pd.DataFrame, Dict[str, Any], List[Dict[str, Any]], Dict[str, pd.DataFrame], pd.DataFrame, Dict[str, Any]]:
     st.markdown("### 실시간 KRA 분석")
     if "live_data" not in st.session_state:
@@ -3855,7 +5106,23 @@ def render_live_panel(rc_date: str, meet: str, race_no: int, selected: List[str]
         st.session_state["api_status"] = _end_of_day_cache_status(meet, int(race_no))
         st.session_state["live_race_key"] = current_race_key
     should_auto_fetch = (not ended_today) and (not st.session_state.get("live_data"))
-    if (not ended_today) and (run or run_sim or should_auto_fetch):
+    auto_allowed, auto_reason, auto_target_no = _auto_collect_window_by_schedule(rc_date, meet, int(race_no))  # AUTO_5MIN_SCHEDULE_FORCE_GATE
+    if auto_target_no:
+        race_no = int(auto_target_no)
+    st.caption(f"자동수집 상태: {auto_reason}")
+    learn_stat = _learning_summary_from_bigdata()  # THREE_TYPE_PC_LEARNING_SUMMARY
+    st.caption(f"학습데이터: {learn_stat.get('총기록', 0)}건 · 안정 {learn_stat.get('안정형적중',0)} / 변수 {learn_stat.get('변수형적중',0)} / 고배당 {learn_stat.get('고배당형적중',0)}")
+    _cmd_current_row = {}
+    try:
+        _cmd_current_row.update(load_mobile_recommend_json() if "load_mobile_recommend_json" in globals() else {})
+        _cmd_current_row.update({"날짜": rc_date, "경마장": meet, "경주번호": int(race_no)})
+    except Exception:
+        pass
+    render_pc_command_console(_cmd_current_row)  # PC_COMMAND_CONSOLE_RENDER_APPLY
+    render_self_learning_control_center()  # SELF_LEARNING_CENTER_RENDER_APPLY
+    render_weekly_agent_center()  # WEEKLY_AGENT_CENTER_RENDER_APPLY
+    should_auto_fetch = bool(auto_allowed)
+    if run or run_sim or should_auto_fetch:
         with st.spinner(f"{meet} {int(race_no)}경주 실시간 API 수집 중... 최대 30~60초 걸릴 수 있습니다."):
             data, status = fetch_all_live(rc_date, meet, int(race_no), selected)
         data = _filter_data_selected_race(data, rc_date, meet, int(race_no)) if "_filter_data_selected_race" in globals() else data
