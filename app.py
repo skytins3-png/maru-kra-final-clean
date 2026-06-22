@@ -3827,214 +3827,149 @@ def _compact_ticket_lines(text: Any, limit: int = 18) -> str:
     return "\n".join(lines[:limit]) + "\n... 이하 상세는 PC 화면에서 확인"
 
 
+
+# MOBILE_REAL_COMPACT_3TYPE_ONLY_FIX
+def _mobile_real_compact_css() -> str:
+    return """
+    <style>
+    .main .block-container {padding-top: 0.7rem; padding-bottom: 1rem; max-width: 760px;}
+    #MainMenu, header, footer {visibility: hidden;}
+    div[data-testid="stToolbar"] {display:none;}
+    .mk-wrap {font-family: -apple-system, BlinkMacSystemFont, "Noto Sans KR", sans-serif;}
+    .mk-top {background: linear-gradient(180deg,#101014,#050506); border: 2px solid #d6ad43; border-radius: 24px; padding: 22px 20px; margin: 8px 0 12px 0; text-align:center; box-shadow: 0 10px 26px rgba(0,0,0,.18);}
+    .mk-small {font-size: 15px; color:#b8b8b8; font-weight:700;}
+    .mk-title {font-size: 34px; color:#fff; font-weight:900; line-height:1.15; margin-top:6px;}
+    .mk-gold {color:#ffd15a;}
+    .mk-status {background:#fff8d7; color:#594200; border-radius:18px; padding:14px 16px; font-size:17px; font-weight:800; margin:12px 0;}
+    .mk-grid {display:grid; grid-template-columns:1fr; gap:10px;}
+    .mk-card {background: linear-gradient(180deg,#151515,#060606); border: 2px solid #d6ad43; border-radius:22px; padding:17px 18px; color:#fff;}
+    .mk-card h3 {margin:0 0 7px 0; color:#ffd15a; font-size:22px;}
+    .mk-rep {font-size:34px; font-weight:900; letter-spacing:1px; margin:2px 0 8px 0;}
+    .mk-six {font-size:15px; color:#d8dde8; line-height:1.42; word-break:keep-all;}
+    .mk-reason {font-size:13px; color:#aeb6c5; margin-top:7px;}
+    .mk-note {font-size:13px; color:#7a7a7a; margin-top:10px; text-align:center;}
+    </style>
+    """
+
+def _safe_mobile_val(row: Dict[str, Any], *keys: str, default: str = "-") -> str:
+    for k in keys:
+        v = row.get(k, "")
+        if v is not None and str(v).strip():
+            return str(v).strip()
+    return default
+
+def _format_6_for_mobile(text: Any) -> str:
+    combos = _split_combo_text_to_list(text) if "_split_combo_text_to_list" in globals() else []
+    if combos:
+        return " · ".join(combos[:6])
+    s = str(text or "").strip()
+    return s if s else "-"
+
+def _render_mobile_compact_3type_view(row: Dict[str, Any]) -> None:
+    row = dict(row or {})
+    try:
+        if "_build_three_type_recommendation" in globals():
+            row = _build_three_type_recommendation(row)
+    except Exception:
+        pass
+
+    meet = _safe_mobile_val(row, "경마장", default="서울")
+    race_no = _safe_mobile_val(row, "경주번호", default="-")
+    race_time = _safe_mobile_val(row, "경주시간", "출발시간", default="-")
+    status = _safe_mobile_val(row, "상태", "데이터상태", default="대기")
+    saved = _safe_mobile_val(row, "저장시각", default="-")
+    stable_rep = _safe_mobile_val(row, "안정형대표", default="-")
+    stable_6 = _format_6_for_mobile(row.get("안정형6", ""))
+    stable_reason = _safe_mobile_val(row, "안정형근거", default="최근폼·기수·주로 안정성 우선")
+    var_rep = _safe_mobile_val(row, "변수형대표", "변수대응형대표", default="-")
+    var_6 = _format_6_for_mobile(row.get("변수형6", row.get("변수대응형6", "")))
+    var_reason = _safe_mobile_val(row, "변수형근거", "변수대응형근거", default="체중·게이트·주로·기수 변경 대응")
+    high_rep = _safe_mobile_val(row, "고배당형대표", default="-")
+    high_6 = _format_6_for_mobile(row.get("고배당형6", ""))
+    high_reason = _safe_mobile_val(row, "고배당형근거", default="배당 대비 기대값 우선")
+    amount = _safe_mobile_val(row, "총추천금액", "추천금액", default="18,000원")
+    unit = _safe_mobile_val(row, "단위금액", default="1,000원")
+    auto = _safe_mobile_val(row, "자동화모드", default="Y")
+
+    st.markdown(_mobile_real_compact_css(), unsafe_allow_html=True)
+    st.markdown(f"""
+    <div class="mk-wrap">
+      <div class="mk-top">
+        <div class="mk-small">MARU KRA · 모바일 3분류 핵심</div>
+        <div class="mk-title">{meet} {race_no}R <span class="mk-gold">삼쌍승 18장</span></div>
+        <div class="mk-small">경주시간 {race_time} · 기준 {amount} · 각 {unit}</div>
+      </div>
+      <div class="mk-status">상태: {status} · 자동화 {auto} · 저장 {saved}</div>
+      <div class="mk-grid">
+        <div class="mk-card">
+          <h3>① 안정형 6장</h3>
+          <div class="mk-rep">{stable_rep}</div>
+          <div class="mk-six">{stable_6}</div>
+          <div class="mk-reason">{stable_reason}</div>
+        </div>
+        <div class="mk-card">
+          <h3>② 변수형 6장</h3>
+          <div class="mk-rep">{var_rep}</div>
+          <div class="mk-six">{var_6}</div>
+          <div class="mk-reason">{var_reason}</div>
+        </div>
+        <div class="mk-card">
+          <h3>③ 고배당형 6장</h3>
+          <div class="mk-rep">{high_rep}</div>
+          <div class="mk-six">{high_6}</div>
+          <div class="mk-reason">{high_reason}</div>
+        </div>
+      </div>
+      <div class="mk-note">자동구매/자동결제 없음 · 더비온에서 본인이 수동 입력·확정</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    copy_text = _three_type_mobile_ticket(row) if "_three_type_mobile_ticket" in globals() else str(row.get("구매표복사", ""))
+    c1, c2 = st.columns(2)
+    with c1:
+        st.download_button("📋 18장 텍스트", copy_text, file_name=f"maru_{meet}_{race_no}R_18tickets.txt")
+    with c2:
+        st.link_button("↗ 더비온 열기", "https://www.derbyon.co.kr")
+
+
 def render_mobile_quick_view() -> None:
-    """갤럭시 S26 Ultra 256GB 맞춤 모바일: 분석 앱 → 10초 수동구매 모드 → 공식 구매표 이동 흐름."""
-    css()
-    st.caption("S26 Ultra 256GB 맞춤 · 더비온 등록완료 모드 · 자동구매/자동결제 없음 · 공식 구매표에서 직접 입력·확정")
+    # MOBILE_REAL_COMPACT_RENDER_ONLY
+    if "_install_auto_refresh" in globals():
+        _install_auto_refresh(60, "mobile_compact")
+    try:
+        latest = load_mobile_recommend_json() if "load_mobile_recommend_json" in globals() else {}
+    except Exception:
+        latest = {}
 
-    ready = mobile_ready_recommendations(20)
-    if isinstance(ready, pd.DataFrame) and ready.empty:  # MOBILE_READY_EMPTY_GUARD
-        ready = pd.DataFrame([_safe_first_mobile_row({}, {})])
-    if ready.empty:
-        st.markdown(
-            f"""
-<div class="mobile-phone" style="max-width:560px;">
-  <div class="mobile-topbar"><span>☰</span><span>MARU KRA 실시간 분석</span><span>🔔</span></div>
-  <div class="mobile-alert">지금 표시할 추천 없음</div>
-  <div class="mobile-main-combo">
-    <div class="race">구매 가능 시간대 대기 중</div>
-    <div class="mobile-safe-note">아직 구매할 추천 조합이 없습니다.<br>PC/허브 분석 저장 후 모바일에 자동 표시됩니다.</div>
-    <div class="mobile-safe-note">추천 저장 후 {MOBILE_READY_WINDOW_MIN}분 이내 · 결과대기 상태일 때만 표시</div>
-  </div>
-  <div class="mobile-copy-box">추천 확인 · 공식 구매 페이지 열기 · 새로고침</div>
-  <div class="mobile-footer-line"><span>추천만 표시</span><span>18장 수동구매</span><span>직접 결제</span></div>
-</div>
-""",
-            unsafe_allow_html=True,
-        )
-        st.markdown("### 📱 모바일에서 바로 추천 만들기")
-        cur_mobile_race = current_live_race_from_schedule("서울", today_kst())
-        default_no = int(cur_mobile_race.get("경주번호", 1)) if cur_mobile_race else 1
-        default_time = str(cur_mobile_race.get("경주시간", st.session_state.get("race_time_text", ""))) if cur_mobile_race else st.session_state.get("race_time_text", "")
-        mcol1, mcol2, mcol3 = st.columns([1.1, .8, 1])
-        with mcol1:
-            mobile_meet = st.selectbox("경마장", ["서울", "부산경남", "제주"], index=0, key="mobile_run_meet")
-        with mcol2:
-            mobile_race_no = st.number_input("경주", min_value=1, max_value=20, value=default_no, step=1, key="mobile_run_race_no")
-        with mcol3:
-            mobile_race_time = st.text_input("경주시간", value=default_time, placeholder="예: 14:30", key="mobile_run_race_time")
-    latest = sync_row_to_current_race(_safe_first_mobile_row(ready), force_if_stale=True)
-    latest = _sanitize_mobile_loaded_row(latest)  # MOBILE_PC_SYNC_RENDER_SANITIZE
-    latest = _mobile_compact_summary(latest)  # MOBILE_COMPACT_RENDER
-    latest = _build_three_type_recommendation(latest)  # THREE_TYPE_MOBILE_RENDER_APPLY
-    latest["구매표복사"] = _three_type_mobile_ticket(latest)
-    latest["구매표복사"] = _compact_ticket_lines(latest.get("구매표복사", ""), 22)
-    # 실제 시간표가 현재 6R인데 mobile_recommend.json이 1R로 남는 문제를 여기서 최종 차단
-    meet = str(latest.get("경마장", "서울"))
-    race_no = _norm_race_no(latest.get("경주번호", "-"))
-    elapsed = latest.get("추천경과분", "-")
-    confidence = latest.get("신뢰도", "-")
-    odds = latest.get("예상배당", "-")
-    risk = str(latest.get("위험도", "중간"))
-    groups = parse_groups_from_latest(latest)
-    tickets = expand_triple_18(groups)
-    total_amount = len(tickets) * 1000
-    status_info = _mobile_status_payload(latest)
-    first_group = groups[0][:3] if groups else ["-", "-", "-"]
-    first_combo = "-".join(first_group)
-    first_tickets = expand_triple_18([first_group])[:6]
-    first_text = (
-        f"{meet} {race_no}R 삼쌍승 1조합 6장 / 각 1,000원 / 총 6,000원\n"
-        + "\n".join([f"{i}. {c} / 1,000원" for i, c in enumerate(first_tickets, start=1)])
-    )
+    if not isinstance(latest, dict) or not latest:
+        latest = {
+            "경마장": "서울",
+            "경주번호": "-",
+            "경주시간": "-",
+            "상태": "모바일 추천 데이터 대기",
+            "안정형대표": "-",
+            "변수형대표": "-",
+            "고배당형대표": "-",
+            "안정형6": "",
+            "변수형6": "",
+            "고배당형6": "",
+            "총추천금액": "18,000원",
+            "단위금액": "1,000원",
+        }
 
-    # 1번 화면: 분석 앱 요약 화면
-    st.markdown(f"""
-<div class="mobile-phone" style="max-width:560px;">
-  <div class="mobile-topbar"><span>☰</span><span>MARU KRA 실시간 분석</span><span>🔔</span></div>
-  <div class="mobile-glow-title">
-    <div class="small">🏆 지금 놓치면 아까운 추천 · {elapsed}분 전 저장</div>
-    <div class="race">{meet} {race_no}R</div>
-    <div class="combo-main">삼쌍승 18장</div>
-    <div class="combo-sub">3묶음 × 6순서 · 각 1,000원</div>
-  </div>
-</div>
-""", unsafe_allow_html=True)
+    try:
+        if "_sanitize_mobile_loaded_row" in globals():
+            latest = _sanitize_mobile_loaded_row(latest)
+        if "_mobile_compact_summary" in globals():
+            latest = _mobile_compact_summary(latest)
+        if "_build_three_type_recommendation" in globals():
+            latest = _build_three_type_recommendation(latest)
+    except Exception:
+        pass
 
-    m1, m2, m3 = st.columns(3)
-    with m1:
-        st.metric("예상배당", f"{odds}배")
-    with m2:
-        st.metric("신뢰도", f"{confidence}")
-    with m3:
-        st.metric("위험도", risk)
+    _render_mobile_compact_3type_view(latest)
+    return
 
-    s1, s2, s3 = st.columns(3)
-    with s1:
-        st.metric("경주시간", status_info["race_time_text"])
-    with s2:
-        st.metric("추천저장", status_info["saved_at_text"])
-    with s3:
-        st.metric("상태", status_info["status"])
-
-    st.markdown(f"""
-<div class="mobile-budget" style="max-width:560px; margin-left:auto; margin-right:auto;">
-  <div class="title">총 구매 기준</div>
-  <div class="amount">{total_amount:,}원</div>
-  <div class="mobile-safe-note">삼쌍승 {len(tickets)}장 × 1,000원 · {status_info['detail']}</div>
-</div>
-""", unsafe_allow_html=True)
-
-    c1, c2, c3 = st.columns(3)
-    labels = ["추천창 1 · 안정형", "추천창 2 · 변수형", "추천창 3 · 고배당형"]
-    for col, label, g in zip([c1, c2, c3], labels, groups[:3]):
-        with col:
-            st.markdown(f"""
-<div class="mobile-reco-card">
-  <div class="card-title">{label}</div>
-  <div class="card-combo">{'-'.join(g[:3])}</div>
-  <div class="card-sub">6장 · 6,000원</div>
-</div>
-""", unsafe_allow_html=True)
-
-    st.markdown(f"""
-<div style="max-width:560px; margin:12px auto 8px auto; display:grid; gap:10px;">
-  <div style="border:1.5px solid #d5a83c; border-radius:16px; padding:13px 14px; background:linear-gradient(180deg,#171717,#070707); color:#f8d777; font-weight:1000; display:flex; justify-content:space-between; align-items:center;">
-    <span>🍃 허브 저장</span><span>›</span>
-  </div>
-  <div style="border-radius:16px; padding:15px 14px; background:linear-gradient(180deg,#ffd96d,#d39a24); color:#111; font-size:1.15rem; font-weight:1000; display:flex; justify-content:space-between; align-items:center;">
-    <span>⏱ 10초 수동구매 모드</span><span>›</span>
-  </div>
-</div>
-""", unsafe_allow_html=True)
-
-    if status_info["result_text"] and status_info["result_text"] not in ["결과대기", "nan", "None"]:
-        def _money_txt(v):
-            try:
-                return f"{int(float(v)):,}원"
-            except Exception:
-                return "-"
-        st.success(f"결과 확인 · 실제결과 {status_info['result_text']} · 환급 {_money_txt(status_info['refund'])} · 손익 {_money_txt(status_info['profit'])}")
-    elif status_info["status"] == "결과대기":
-        st.warning("경주가 시작되었거나 종료되었습니다. 결과가 들어오면 이 자리에서 적중/실패/손익을 보여줍니다.")
-    elif status_info["status"] == "구매 가능":
-        st.info("지금은 구매 가능한 추천 화면입니다. 아래 10초 수동구매 모드에서 조합 복사 후 공식 구매표에서 직접 입력하세요.")
-    else:
-        st.info("아직 구매 대기 구간입니다. 추천은 유지되며 경주시간이 가까워지면 바로 확인하면 됩니다.")
-
-    # 2번 화면: 10초 수동구매 모드 + 조합별 빠른 복사
-    st.markdown(f"""
-<div class="mobile-phone" style="max-width:560px; margin-top:18px;">
-  <div class="mobile-topbar"><span>‹</span><span>10초 수동구매 모드</span><span>🔒</span></div>
-  <div class="mobile-alert">🔔 지금 바로 확인</div>
-  <div class="mobile-glow-title">
-    <div class="race">{meet} {race_no}R</div>
-    <div class="combo-main" style="font-size:3.2rem;">{first_combo}</div>
-    <div class="combo-sub">1조합 6장 · 6,000원</div>
-  </div>
-  <div class="mobile-safe-note">추천 조합을 보고 공식 구매표에서 직접 입력</div>
-</div>
-""", unsafe_allow_html=True)
-
-    group_texts: List[str] = []
-    group_labels = ["1조합 6장", "2조합 6장", "3조합 6장"]
-    for gi, g in enumerate(groups[:3], start=1):
-        group_tickets = expand_triple_18([g])[:6]
-        group_text = (
-            f"{meet} {race_no}R 삼쌍승 {gi}조합 6장 / 각 1,000원 / 총 6,000원\n"
-            + "\n".join([f"{i}. {c} / 1,000원" for i, c in enumerate(group_tickets, start=1)])
-        )
-        group_texts.append(group_text)
-
-    st.markdown("### 🧩 조합별 빠른 복사")
-    tabs = st.tabs(group_labels)
-    for idx, tab in enumerate(tabs):
-        with tab:
-            group_text = group_texts[idx] if idx < len(group_texts) else "추천 조합 없음"
-            st.caption(f"{['10초 급함','30초 가능','60초 가능'][idx]} · {group_labels[idx]}")
-            st.text_area(f"{idx+1}조합 복사용", value=group_text, height=150, label_visibility="collapsed")
-            st.download_button(
-                f"📋 {idx+1}조합 6장 텍스트 받기",
-                data=group_text.encode("utf-8"),
-                file_name=f"MARU_{meet}_{race_no}R_{idx+1}조합_삼쌍승6장.txt",
-                mime="text/plain",
-                width="stretch",
-                key=f"mobile_group_download_{idx+1}",
-            )
-
-    st.markdown(derbyon_notice_html(meet, race_no, first_combo), unsafe_allow_html=True)
-
-    st.markdown(f"""
-<div style="max-width:560px; margin:14px auto; background:#fff; color:#111; border-radius:22px; padding:18px; border:1px solid #e5e7eb;">
-  <div style="font-size:1.15rem; font-weight:1000; color:#0f3b76; margin-bottom:12px;">KRA 공식 마권구매 페이지 입력 안내</div>
-  <div style="display:grid; gap:9px; font-weight:900;">
-    <div>경마장: <b>{meet}</b></div>
-    <div>경주: <b>{race_no}R</b></div>
-    <div>마권종류: <b>삼쌍승</b></div>
-    <div>마번: <b>{first_combo}</b></div>
-    <div>구매금액: <b>각 1,000원</b></div>
-  </div>
-  <div style="margin-top:12px; color:#6b7280; font-weight:800; font-size:.9rem;">결제 및 최종 확정은 공식 구매표에서 직접 진행</div>
-</div>
-""", unsafe_allow_html=True)
-
-    d1, d2 = st.columns(2)
-    with d1:
-        if st.button("🔥 모바일 허브분석 재실행", type="primary", width="stretch"):
-            with st.spinner("모바일에서 최신 추천 다시 만드는 중..."):
-                ok, row, msg = run_mobile_hub_analysis(meet, _safe_race_no(race_no), status_info.get("race_time_text", ""))
-            if ok:
-                st.success(msg)
-                st.rerun()
-            else:
-                st.error(msg)
-    with d2:
-        if st.button("🔄 추천 확인", width="stretch"):
-            st.rerun()
-    st.link_button("↗ 더비온 공식 구매표 열기", kra_buy_url(meet), type="primary", width="stretch")
-
-    st.caption("※ S26 Ultra 256GB 화면에 맞춰 분석 앱 → 10초 수동구매 모드 → 공식 구매표 이동 흐름으로 구성했습니다. 모바일에서 직접 허브분석 실행 가능, PC의 전체 분석/허브/API/빅데이터 기능은 그대로 유지됩니다.")
-    st.stop()
 
 
 def load_auto_analysis_log() -> pd.DataFrame:
