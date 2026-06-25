@@ -3891,6 +3891,10 @@ def _render_mobile_compact_3type_view(row: Dict[str, Any]) -> None:
     unit = _safe_mobile_val(row, "단위금액", default="1,000원")
     auto = _safe_mobile_val(row, "자동화모드", default="Y")
 
+    row = _mobile_drop_placeholder_combos(row) if "_mobile_drop_placeholder_combos" in globals() else row  # MOBILE_NO_BLANK_COMPACT_GATE
+    if "_mobile_has_any_real_recommend" in globals() and not _mobile_has_any_real_recommend(row):
+        _render_mobile_end_or_wait_view(row)
+        return
     st.markdown(_mobile_real_compact_css(), unsafe_allow_html=True)
     st.markdown(f"""
     <div class="mk-wrap">
@@ -3932,8 +3936,197 @@ def _render_mobile_compact_3type_view(row: Dict[str, Any]) -> None:
         st.link_button("↗ 더비온 열기", "https://www.derbyon.co.kr")
 
 
+
+
+# PC_MOBILE_CHARACTER_UNIFIED_FIX
+CHARACTER_AGENTS = [
+    {"name": "해", "animal": "태양 그리핀", "role": "총괄·전략", "mission": "안정형/변수형/고배당형 최종 균형 판단", "emoji": "🦁☀️"},
+    {"name": "달", "animal": "달빛 토끼", "role": "수집·감시", "mission": "한국시간 경주일정·자동수집창·종료시점 감시", "emoji": "🐇🌙"},
+    {"name": "별", "animal": "별사슴", "role": "분석·패턴", "mission": "공식API·출전표·배당·결과 패턴 분석", "emoji": "🦌⭐"},
+    {"name": "구름", "animal": "구름양", "role": "통신·복구", "mission": "허브·API·모바일·PC 동기화와 오류 복구", "emoji": "🐏☁️"},
+    {"name": "비", "animal": "비고래", "role": "학습·개선", "mission": "실제결과·손익·실패원인 저장 후 가중치 개선", "emoji": "🐋💧"},
+]
+
+def _character_growth_phase() -> Dict[str, Any]:
+    try:
+        now = now_kst() if "now_kst" in globals() else datetime.datetime.now()
+    except Exception:
+        now = datetime.datetime.now()
+    wd = now.weekday()
+    if wd in [0, 1, 2, 3]:
+        return {"mode": "월화수목 허브성장", "active": True, "apply": False, "weekday": wd, "hour": now.hour}
+    if wd == 4 and now.hour < 7:
+        return {"mode": "금요일 07시 적용대기", "active": True, "apply": False, "weekday": wd, "hour": now.hour}
+    if wd == 4 and now.hour >= 7:
+        return {"mode": "금요일 07시 전략적용", "active": True, "apply": True, "weekday": wd, "hour": now.hour}
+    return {"mode": "주말 실전운영", "active": True, "apply": True, "weekday": wd, "hour": now.hour}
+
+def _agent_growth_from_hub() -> Dict[str, Any]:
+    stat = {"learning_count": 0, "agent_runs": 0, "web_patrol": 0, "comm_ok": 0, "apply_count": 0}
+    try:
+        if "external_hub_load" in globals():
+            learn = external_hub_load("learning_bigdata")
+            runs = external_hub_load("agent_runs")
+            patrol = external_hub_load("web_patrol")
+            comm = external_hub_load("comm_status")
+            apply_log = external_hub_load("weekly_apply_log")
+            stat["learning_count"] = len(learn) if isinstance(learn, list) else (1 if isinstance(learn, dict) and learn else 0)
+            stat["agent_runs"] = len(runs) if isinstance(runs, list) else (1 if isinstance(runs, dict) and runs else 0)
+            stat["web_patrol"] = len(patrol) if isinstance(patrol, list) else (1 if isinstance(patrol, dict) and patrol else 0)
+            stat["comm_ok"] = 1 if isinstance(comm, dict) and comm else 0
+            stat["apply_count"] = len(apply_log) if isinstance(apply_log, list) else (1 if isinstance(apply_log, dict) and apply_log else 0)
+    except Exception:
+        pass
+
+    growth = {}
+    base_exp = stat["learning_count"] * 18 + stat["agent_runs"] * 12 + stat["web_patrol"] * 10 + stat["comm_ok"] * 8 + stat["apply_count"] * 20
+    for i, a in enumerate(CHARACTER_AGENTS):
+        exp = max(0, base_exp + (i + 1) * 7)
+        level = 1 + min(30, exp // 100)
+        pct = int(exp % 100)
+        stage = "새싹"
+        if level >= 5: stage = "성장"
+        if level >= 10: stage = "진화"
+        if level >= 20: stage = "각성"
+        growth[a["name"]] = {"레벨": int(level), "경험치": pct, "단계": stage, "누적EXP": int(exp), "상태": "활동중"}
+    return growth
+
+def _save_character_growth_to_hub() -> Dict[str, Any]:
+    payload = {
+        "저장시각": now_str() if "now_str" in globals() else str(datetime.datetime.now()),
+        "주간모드": _character_growth_phase(),
+        "캐릭터성장": _agent_growth_from_hub(),
+        "운영방식": "월화수목 허브 성장 · 금요일 07시 적용 · 주말 실전운영",
+        "자동구매": "없음",
+        "자동결제": "없음",
+    }
+    try:
+        if "external_hub_save" in globals():
+            external_hub_save("character_growth", payload)
+    except Exception:
+        pass
+    return payload
+
+def _character_growth_css() -> str:
+    return """
+    <style>
+    .agent-zone {display:grid; grid-template-columns: repeat(auto-fit,minmax(160px,1fr)); gap:12px;}
+    .agent-card {background:linear-gradient(180deg,#111827,#05070c); border:1.5px solid #d6ad43; border-radius:20px; padding:15px; color:#fff; position:relative; overflow:hidden; min-height:170px;}
+    .agent-card:before {content:""; position:absolute; width:90px; height:90px; right:-25px; top:-25px; border-radius:60px; background:rgba(255,209,90,.16); animation:pulseGlow 2.4s infinite ease-in-out;}
+    .agent-emoji {font-size:38px; animation:floatAgent 2.6s infinite ease-in-out;}
+    .agent-name {font-size:25px; font-weight:900; color:#ffd15a; margin-top:4px;}
+    .agent-animal {font-size:15px; color:#dbeafe; font-weight:800;}
+    .agent-role {font-size:12px; color:#a8b3c7; margin:8px 0;}
+    .agent-bar {height:9px; background:#263244; border-radius:999px; overflow:hidden; margin-top:8px;}
+    .agent-fill {height:9px; background:linear-gradient(90deg,#f7c948,#38bdf8); border-radius:999px;}
+    .agent-level {font-size:12px; color:#e5e7eb; margin-top:7px;}
+    @keyframes floatAgent {0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}
+    @keyframes pulseGlow {0%,100%{opacity:.4; transform:scale(.9)}50%{opacity:1; transform:scale(1.08)}}
+    </style>
+    """
+
+def _character_cards_html(compact: bool = False) -> str:
+    payload = _save_character_growth_to_hub()
+    growth = payload.get("캐릭터성장", {})
+    html = ['<div class="agent-zone">']
+    for a in CHARACTER_AGENTS:
+        g = growth.get(a["name"], {})
+        exp_pct = max(0, min(100, int(g.get("경험치", 0))))
+        mission = a["role"] if compact else f"{a['role']} · {a['mission']}"
+        html.append(f"""
+        <div class="agent-card">
+          <div class="agent-emoji">{a['emoji']}</div>
+          <div class="agent-name">{a['name']}</div>
+          <div class="agent-animal">{a['animal']}</div>
+          <div class="agent-role">{mission}</div>
+          <div class="agent-bar"><div class="agent-fill" style="width:{exp_pct}%"></div></div>
+          <div class="agent-level">Lv.{g.get('레벨',1)} · EXP {exp_pct}% · {g.get('단계','새싹')}</div>
+        </div>
+        """)
+    html.append("</div>")
+    return "".join(html)
+
+def render_character_growth_dashboard() -> None:
+    try:
+        payload = _save_character_growth_to_hub()
+        phase = payload.get("주간모드", {})
+        st.markdown("### 🐾 해·달·별·구름·비 성장 허브")
+        st.caption(f"{phase.get('mode','')} · PC/모바일 캐릭터 성장 표시")
+        st.markdown(_character_growth_css(), unsafe_allow_html=True)
+        st.markdown(_character_cards_html(False), unsafe_allow_html=True)
+        with st.expander("캐릭터 성장 데이터", expanded=False):
+            st.json(payload)
+    except Exception as e:
+        st.warning(f"캐릭터 성장 허브 표시 오류: {e}")
+
+def render_mobile_character_strip() -> None:
+    try:
+        st.markdown(_character_growth_css(), unsafe_allow_html=True)
+        st.markdown("### 🐾 에이전트 활동")
+        st.markdown(_character_cards_html(True), unsafe_allow_html=True)
+    except Exception:
+        pass
+
+
+# MOBILE_NO_BLANK_ENDSTATE_FIX
+def _mobile_has_real_combo_value(v: Any) -> bool:
+    s = str(v or "").strip()
+    if not s or s in ["-", "대기", "None", "nan"]:
+        return False
+    nums = re.findall(r"\d+", s)
+    return len(nums) >= 3
+
+def _mobile_has_any_real_recommend(row: Dict[str, Any]) -> bool:
+    row = dict(row or {})
+    keys = [
+        "안정형대표", "안정형6",
+        "변수형대표", "변수형6", "변수대응형대표", "변수대응형6",
+        "고배당형대표", "고배당형6",
+        "삼쌍승18조합", "구매표복사",
+    ]
+    return any(_mobile_has_real_combo_value(row.get(k, "")) for k in keys)
+
+def _mobile_drop_placeholder_combos(row: Dict[str, Any]) -> Dict[str, Any]:
+    row = dict(row or {})
+    for k in ["안정형대표", "변수형대표", "변수대응형대표", "고배당형대표"]:
+        if not _mobile_has_real_combo_value(row.get(k, "")):
+            row[k] = ""
+    for k in ["안정형6", "변수형6", "변수대응형6", "고배당형6", "삼쌍승18조합"]:
+        if not _mobile_has_real_combo_value(row.get(k, "")):
+            row[k] = ""
+    return row
+
+def _render_mobile_end_or_wait_view(row: Dict[str, Any]) -> None:
+    row = dict(row or {})
+    meet = _safe_mobile_val(row, "경마장", default="서울") if "_safe_mobile_val" in globals() else str(row.get("경마장","서울"))
+    race_no = _safe_mobile_val(row, "경주번호", default="-") if "_safe_mobile_val" in globals() else str(row.get("경주번호","-"))
+    status = _safe_mobile_val(row, "상태", "데이터상태", default="추천 대기") if "_safe_mobile_val" in globals() else str(row.get("상태", row.get("데이터상태","추천 대기")))
+    saved = _safe_mobile_val(row, "저장시각", default="-") if "_safe_mobile_val" in globals() else str(row.get("저장시각","-"))
+    st.markdown(_mobile_real_compact_css(), unsafe_allow_html=True)
+    st.markdown(f"""
+    <div class="mk-wrap">
+      <div class="mk-top">
+        <div class="mk-small">MARU KRA · 모바일 상태</div>
+        <div class="mk-title">{meet} {race_no}R <span class="mk-gold">추천 없음</span></div>
+        <div class="mk-small">저장 {saved}</div>
+      </div>
+      <div class="mk-status">상태: {status}</div>
+      <div class="mk-card">
+        <h3>오늘 표시할 실전 추천이 없습니다</h3>
+        <div class="mk-six">
+          허브에 남은 빈 추천/예전 추천/종료 후 추천은 모바일에서 표시하지 않습니다.<br>
+          다음 경주 수집창이 열리거나 PC에서 새 3분류 추천이 저장되면 자동 표시됩니다.
+        </div>
+        <div class="mk-reason">안정형·변수형·고배당형 중 실제 3숫자 조합이 있을 때만 표시</div>
+      </div>
+      <div class="mk-note">자동구매/자동결제 없음 · 구매는 항상 본인이 수동 확정</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+
 def render_mobile_quick_view() -> None:
     # MOBILE_REAL_COMPACT_RENDER_ONLY
+    # MOBILE_NO_BLANK_RENDER_GATE
     if "_install_auto_refresh" in globals():
         _install_auto_refresh(60, "mobile_compact")
     try:
@@ -3947,9 +4140,9 @@ def render_mobile_quick_view() -> None:
             "경주번호": "-",
             "경주시간": "-",
             "상태": "모바일 추천 데이터 대기",
-            "안정형대표": "-",
-            "변수형대표": "-",
-            "고배당형대표": "-",
+            "안정형대표": "",
+            "변수형대표": "",
+            "고배당형대표": "",
             "안정형6": "",
             "변수형6": "",
             "고배당형6": "",
@@ -3964,10 +4157,17 @@ def render_mobile_quick_view() -> None:
             latest = _mobile_compact_summary(latest)
         if "_build_three_type_recommendation" in globals():
             latest = _build_three_type_recommendation(latest)
+        latest = _mobile_drop_placeholder_combos(latest)
     except Exception:
         pass
 
+    if not _mobile_has_any_real_recommend(latest):
+        _render_mobile_end_or_wait_view(latest)
+        render_mobile_character_strip()  # MOBILE_CHARACTER_STRIP_APPLY
+        return
+
     _render_mobile_compact_3type_view(latest)
+    render_mobile_character_strip()  # MOBILE_CHARACTER_STRIP_APPLY
     return
 
 
@@ -4423,207 +4623,6 @@ def _auto_web_patrol_if_due() -> Dict[str, Any]:
 
 
 
-
-# CHARACTER_GROWTH_WEEKLY_HUB_FIX
-CHARACTER_AGENTS = [
-    {
-        "name": "해",
-        "animal": "태양 그리핀",
-        "role": "총괄·전략",
-        "mission": "안정형/변수형/고배당형 최종 균형 판단",
-        "emoji": "🦁☀️",
-        "element": "sun",
-    },
-    {
-        "name": "달",
-        "animal": "달빛 토끼",
-        "role": "수집·감시",
-        "mission": "한국시간 경주일정·자동수집창·종료시점 감시",
-        "emoji": "🐇🌙",
-        "element": "moon",
-    },
-    {
-        "name": "별",
-        "animal": "별사슴",
-        "role": "분석·패턴",
-        "mission": "공식API·출전표·배당·결과 패턴 분석",
-        "emoji": "🦌⭐",
-        "element": "star",
-    },
-    {
-        "name": "구름",
-        "animal": "구름양",
-        "role": "통신·복구",
-        "mission": "허브·API·모바일·PC 동기화와 오류 복구",
-        "emoji": "🐏☁️",
-        "element": "cloud",
-    },
-    {
-        "name": "비",
-        "animal": "비고래",
-        "role": "학습·개선",
-        "mission": "실제결과·손익·실패원인 저장 후 가중치 개선",
-        "emoji": "🐋💧",
-        "element": "rain",
-    },
-]
-
-def _character_growth_phase() -> Dict[str, Any]:
-    try:
-        now = now_kst() if "now_kst" in globals() else datetime.datetime.now()
-    except Exception:
-        now = datetime.datetime.now()
-    wd = now.weekday()
-    if wd in [0, 1, 2, 3]:
-        return {"mode": "월화수목 허브성장", "active": True, "apply": False, "weekday": wd, "hour": now.hour}
-    if wd == 4 and now.hour < 7:
-        return {"mode": "금요일 07시 적용대기", "active": True, "apply": False, "weekday": wd, "hour": now.hour}
-    if wd == 4 and now.hour >= 7:
-        return {"mode": "금요일 07시 전략적용", "active": True, "apply": True, "weekday": wd, "hour": now.hour}
-    return {"mode": "주말 실전운영", "active": True, "apply": True, "weekday": wd, "hour": now.hour}
-
-def _agent_growth_from_hub() -> Dict[str, Any]:
-    """
-    허브 누적 데이터를 기반으로 캐릭터 레벨/경험치 계산.
-    데이터가 적으면 기본 레벨로 시작하고, 월화수목 허브 운영 때 점진 성장.
-    """
-    stat = {
-        "learning_count": 0,
-        "agent_runs": 0,
-        "web_patrol": 0,
-        "comm_ok": 0,
-        "apply_count": 0,
-    }
-    try:
-        if "external_hub_load" in globals():
-            learn = external_hub_load("learning_bigdata")
-            runs = external_hub_load("agent_runs")
-            patrol = external_hub_load("web_patrol")
-            comm = external_hub_load("comm_status")
-            apply_log = external_hub_load("weekly_apply_log")
-            stat["learning_count"] = len(learn) if isinstance(learn, list) else (1 if isinstance(learn, dict) and learn else 0)
-            stat["agent_runs"] = len(runs) if isinstance(runs, list) else (1 if isinstance(runs, dict) and runs else 0)
-            stat["web_patrol"] = len(patrol) if isinstance(patrol, list) else (1 if isinstance(patrol, dict) and patrol else 0)
-            stat["comm_ok"] = 1 if isinstance(comm, dict) and comm else 0
-            stat["apply_count"] = len(apply_log) if isinstance(apply_log, list) else (1 if isinstance(apply_log, dict) and apply_log else 0)
-    except Exception:
-        pass
-
-    growth = {}
-    base_exp = stat["learning_count"] * 18 + stat["agent_runs"] * 12 + stat["web_patrol"] * 10 + stat["comm_ok"] * 8 + stat["apply_count"] * 20
-    for i, a in enumerate(CHARACTER_AGENTS):
-        bonus = (i + 1) * 7
-        exp = max(0, base_exp + bonus)
-        level = 1 + min(30, exp // 100)
-        pct = int(exp % 100)
-        stage = "새싹"
-        if level >= 5:
-            stage = "성장"
-        if level >= 10:
-            stage = "진화"
-        if level >= 20:
-            stage = "각성"
-        growth[a["name"]] = {
-            "레벨": int(level),
-            "경험치": int(pct),
-            "단계": stage,
-            "누적EXP": int(exp),
-            "상태": "활동중" if _character_growth_phase().get("active") else "대기",
-        }
-    return growth
-
-def _save_character_growth_to_hub() -> Dict[str, Any]:
-    phase = _character_growth_phase()
-    growth = _agent_growth_from_hub()
-    payload = {
-        "저장시각": now_str() if "now_str" in globals() else str(datetime.datetime.now()),
-        "주간모드": phase,
-        "캐릭터성장": growth,
-        "운영방식": "월화수목 허브 성장 · 금요일 07시 적용 · 주말 실전운영",
-        "자동구매": "없음",
-        "자동결제": "없음",
-    }
-    try:
-        if "external_hub_save" in globals():
-            external_hub_save("character_growth", payload)
-    except Exception:
-        pass
-    return payload
-
-def _character_growth_css() -> str:
-    return """
-    <style>
-    .agent-zone {display:grid; grid-template-columns: repeat(auto-fit,minmax(180px,1fr)); gap:12px;}
-    .agent-card {
-        background:linear-gradient(180deg,#111827,#05070c);
-        border:1.5px solid #d6ad43;
-        border-radius:20px;
-        padding:15px;
-        color:#fff;
-        position:relative;
-        overflow:hidden;
-        min-height:190px;
-    }
-    .agent-card:before {
-        content:"";
-        position:absolute;
-        width:110px;
-        height:110px;
-        right:-30px;
-        top:-30px;
-        border-radius:60px;
-        background:rgba(255,209,90,.16);
-        animation:pulseGlow 2.4s infinite ease-in-out;
-    }
-    .agent-emoji {font-size:42px; animation:floatAgent 2.6s infinite ease-in-out;}
-    .agent-name {font-size:26px; font-weight:900; color:#ffd15a; margin-top:4px;}
-    .agent-animal {font-size:16px; color:#dbeafe; font-weight:800;}
-    .agent-role {font-size:13px; color:#a8b3c7; margin:8px 0;}
-    .agent-bar {height:10px; background:#263244; border-radius:999px; overflow:hidden; margin-top:8px;}
-    .agent-fill {height:10px; background:linear-gradient(90deg,#f7c948,#38bdf8); border-radius:999px;}
-    .agent-level {font-size:13px; color:#e5e7eb; margin-top:7px;}
-    @keyframes floatAgent {0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}
-    @keyframes pulseGlow {0%,100%{opacity:.4; transform:scale(.9)}50%{opacity:1; transform:scale(1.08)}}
-    </style>
-    """
-
-def render_character_growth_dashboard() -> None:
-    """
-    PC 허브용 캐릭터 성장 모니터.
-    월화수목에는 허브에서 성장/학습 상태를 보여주고,
-    금요일 07시에 적용된 전략과 함께 확인.
-    """
-    try:
-        payload = _save_character_growth_to_hub()
-        phase = payload.get("주간모드", {})
-        growth = payload.get("캐릭터성장", {})
-        st.markdown("### 🐾 해·달·별·구름·비 성장 허브")
-        st.caption(f"{phase.get('mode','')} · 월화수목 허브성장 / 금요일 07시 적용 / 주말 실전운영")
-        st.markdown(_character_growth_css(), unsafe_allow_html=True)
-
-        html = ['<div class="agent-zone">']
-        for a in CHARACTER_AGENTS:
-            g = growth.get(a["name"], {})
-            exp_pct = max(0, min(100, int(g.get("경험치", 0))))
-            html.append(f"""
-            <div class="agent-card">
-              <div class="agent-emoji">{a['emoji']}</div>
-              <div class="agent-name">{a['name']}</div>
-              <div class="agent-animal">{a['animal']}</div>
-              <div class="agent-role">{a['role']} · {a['mission']}</div>
-              <div class="agent-bar"><div class="agent-fill" style="width:{exp_pct}%"></div></div>
-              <div class="agent-level">Lv.{g.get('레벨',1)} · EXP {exp_pct}% · {g.get('단계','새싹')} · {g.get('상태','대기')}</div>
-            </div>
-            """)
-        html.append("</div>")
-        st.markdown("".join(html), unsafe_allow_html=True)
-
-        with st.expander("캐릭터 성장 데이터 보기", expanded=False):
-            st.json(payload)
-    except Exception as e:
-        st.warning(f"캐릭터 성장 허브 표시 오류: {e}")
-
-
 # WEEKLY_HUB_AGENT_FRI7_APPLY_FIX
 def _weekday_kst() -> int:
     try:
@@ -5029,8 +5028,6 @@ COMMAND_EXAMPLES = [
     "주간운영",
     "금요일적용",
     "월화수목",
-    "캐릭터 성장",
-    "진화 상태",
     "오늘 종료 상태",
     "서울 9경주",
 ]
@@ -5070,8 +5067,6 @@ def _pc_command_parse(cmd: str) -> Dict[str, Any]:
         out["action"] = "recommend"
     elif any(x in s for x in ["모바일", "주소", "링크"]):
         out["action"] = "mobile_link"
-    elif any(x in s for x in ["캐릭터", "성장", "진화", "레벨", "상상동물"]):
-        out["action"] = "character_growth"  # CHARACTER_GROWTH_COMMAND_PARSE
     elif any(x in s for x in ["주간운영", "금요일적용", "월화수목", "주간 AI", "주간에이전트"]):
         out["action"] = "weekly_agent"  # WEEKLY_AGENT_COMMAND_PARSE
     elif any(x in s for x in ["자가학습", "운영센터", "통신점검", "코드진단", "수익효율", "코드개선"]):
@@ -5170,10 +5165,6 @@ def _pc_command_execute(cmd: str, current_row: Dict[str, Any] = None) -> str:
             "캐시 새로고침: https://maru-kra-final-clean.streamlit.app/?mode=mobile&v=cmd"
         )
 
-    if action == "character_growth":
-        payload = _save_character_growth_to_hub()
-        return json.dumps(payload, ensure_ascii=False, indent=2)  # CHARACTER_GROWTH_COMMAND_EXECUTE
-
     if action == "weekly_agent":
         tick = _weekly_agent_tick()
         return _weekly_agent_status_text() + "\n\n" + json.dumps(tick, ensure_ascii=False, indent=2)  # WEEKLY_AGENT_COMMAND_EXECUTE
@@ -5265,7 +5256,6 @@ def render_live_panel(rc_date: str, meet: str, race_no: int, selected: List[str]
     render_pc_command_console(_cmd_current_row)  # PC_COMMAND_CONSOLE_RENDER_APPLY
     render_self_learning_control_center()  # SELF_LEARNING_CENTER_RENDER_APPLY
     render_weekly_agent_center()  # WEEKLY_AGENT_CENTER_RENDER_APPLY
-    render_character_growth_dashboard()  # CHARACTER_GROWTH_RENDER_APPLY
     should_auto_fetch = bool(auto_allowed)
     if run or run_sim or should_auto_fetch:
         with st.spinner(f"{meet} {int(race_no)}경주 실시간 API 수집 중... 최대 30~60초 걸릴 수 있습니다."):
@@ -5588,6 +5578,7 @@ def render() -> None:
         unsafe_allow_html=True,
     )
     st.caption("자동구매/자동결제 없음. 공식 구매 페이지로 이동 후 사용자가 직접 입력·확정합니다.")
+    render_character_growth_dashboard()  # PC_CHARACTER_DASHBOARD_APPLY
 
     with st.sidebar:
         st.title("🐎 MARU KRA")
