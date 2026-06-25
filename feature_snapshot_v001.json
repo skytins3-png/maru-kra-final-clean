@@ -1,0 +1,33 @@
+{
+  "before": {
+    "features": [
+      "Streamlit UI",
+      "API 호출",
+      "timeout 설정",
+      "오류 처리",
+      "다운로드/ZIP",
+      "경마 관련",
+      "토토/스포츠 관련"
+    ],
+    "risks": [
+      "자동구매/자동결제 문구 있음 - 차단 권장"
+    ],
+    "lines": 5682
+  },
+  "after": {
+    "features": [
+      "Streamlit UI",
+      "API 호출",
+      "timeout 설정",
+      "오류 처리",
+      "다운로드/ZIP",
+      "경마 관련",
+      "토토/스포츠 관련"
+    ],
+    "risks": [
+      "자동구매/자동결제 문구 있음 - 차단 권장"
+    ],
+    "lines": 5682
+  },
+  "approved": []
+}
