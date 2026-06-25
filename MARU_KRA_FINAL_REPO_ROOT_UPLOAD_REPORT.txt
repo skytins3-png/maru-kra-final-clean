@@ -1,0 +1,29 @@
+MARU KRA FINAL REPO ROOT UPLOAD 검사 리포트
+생성시각: 2026-06-25 10:48:11
+
+GitHub 루트 업로드 대상:
+.devcontainer/
+maru_kra_data/
+README.txt
+app.py
+auto_hub_runner.py
+requirements.txt
+
+검사 결과:
+OK - app.py 문법검사
+OK - auto_hub_runner.py 문법검사
+OK - requirements.txt 포함
+OK - README.txt 포함
+OK - .devcontainer 포함
+OK - maru_kra_data 포함
+OK - PC/모바일 캐릭터 통합
+OK - 모바일 3분류 간소화
+OK - 빈 추천/종료상태 차단
+OK - 월화수목 허브 운영
+OK - 금요일 07시 적용
+OK - 자가학습 운영센터
+OK - 공개 URL 순찰
+OK - PC 명령 입력창
+OK - 자동구매/자동결제 없음
+
+주의: 실제 API 키와 Google Script URL은 Streamlit Secrets에 넣으세요. 이 ZIP에는 실제 키가 없습니다.
