@@ -1,371 +1,32 @@
+# -*- coding: utf-8 -*-
+"""
+MARU KRA Mobile Final App
+- 경마 공공데이터 API 수집/분석/추천 대시보드
+- 자동 마권 구매/자동 결제 기능 없음
+- 사용자가 직접 확인 후 KRA 구매 페이지로 이동하는 수동 구조
+"""
 
-import streamlit as st
-import zipfile, json, shutil, io, re, ast, subprocess, sys, base64, time
-from pathlib import Path
-from datetime import datetime
+import json
+import os
+import re
+import time
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, List, Tuple
+from urllib.parse import quote_plus
+
+import numpy as np
+import pandas as pd
 import requests
+import streamlit as st
+from pathlib import Path as _maru_Path
+from datetime import datetime as _maru_datetime
+import json as _maru_json
 
-ROOT = Path(__file__).parent
-MEM = ROOT / "ai_memory.json"
-STORE = ROOT / "project_storage"
-VERS = ROOT / "version_outputs"
-GENERATED = ROOT / "generated_projects"
-IMAGE_STORE = ROOT / "image_uploads"
-STORE.mkdir(exist_ok=True)
-VERS.mkdir(exist_ok=True)
-GENERATED.mkdir(exist_ok=True)
-IMAGE_STORE.mkdir(exist_ok=True)
-
-DEFAULT = {
-    "version": "13.0-all-in-one-final",
-    "projects": {},
-    "patch_records": [],
-    "github_deploys": [],
-    "test_records": [],
-    "file_checks": [],
-    "generated_projects": [],
-    "hub_uploads": [],
-    "log_analyses": [],
-    "image_analyses": [],
-    "command_records": [],
-    "google_sheets": {"enabled": False, "sheet_id": "", "service_account_json": ""},
-    "lessons": [],
-}
-
-PATCHES = {
-    "mobile_ui": "모바일 큰 글씨/큰 버튼",
-    "error_logger": "오류 로그 저장",
-    "api_timeout": "API timeout/통신두절 방어",
-    "debug_panel": "디버그 패널",
-    "api_key_guard": "API KEY 보안 안내",
-    "zip_export": "현재 앱 ZIP 다운로드",
-    "kra_helper": "경마 API 점검 도구 파일 추가",
-    "toto_helper": "토토/스포츠 API 점검 도구 파일 추가",
-    "html_render_fix": "HTML 카드 코드노출 수정",
-    "race_schedule_fallback": "경마시간 추천없음 표시 보정",
-}
-
-FEATURES = [
-    "음성지시 제거", "OpenAI API 키 제거", "요금 발생 요소 제거",
-    "ZIP 업로드 자동 압축해제", "프로젝트 보관함", "파일 목록 검사",
-    "오류 파일 검사", "문법 검사", "기존 기능 분석", "자동테스트",
-    "반복 자동테스트", "개선안 추천", "승인/미승인/추가지시",
-    "승인한 항목 실제 패치", "app.py 실제 수정", "helper 파일 실제 추가",
-    "새 버전 ZIP 생성", "GitHub 대상 저장소 자동 업로드/커밋",
-    "Streamlit Cloud 자동 재배포 유도", "구글시트 저장 구조", 
-    "GitHub Actions 예약 테스트 파일 생성", "진화형 AI 코드 생성", "생성 앱 GitHub 허브 자동 업로드", "구글시트 허브 저장", "로그파일 붙여넣기/업로드 분석", "사진 첨부/명령 입력 분석", "HTML 카드 코드노출 수정", "경마시간 추천없음 표시 보정", "자동구매/자동결제 차단"
-]
-
-def load():
-    if MEM.exists():
-        try:
-            m = json.loads(MEM.read_text(encoding="utf-8"))
-            for k, v in DEFAULT.items():
-                m.setdefault(k, v)
-            return m
-        except Exception:
-            pass
-    save(DEFAULT.copy())
-    return DEFAULT.copy()
-
-def save(m):
-    m["updated_at"] = datetime.now().isoformat(timespec="seconds")
-    MEM.write_text(json.dumps(m, ensure_ascii=False, indent=2), encoding="utf-8")
-
-def sname(x):
-    return re.sub(r"[^a-zA-Z0-9가-힣_.-]+", "_", str(x))[:80] or "project"
+from pathlib import Path as _maru_Path
+from datetime import datetime as _maru_datetime
+import json as _maru_json
 
 
-def infer_project_name(name, app_url="", uploaded=None):
-    raw = (name or "").strip()
-    if raw:
-        return raw
-    if app_url:
-        m = re.search(r"https?://([^./]+)", app_url)
-        if m:
-            return m.group(1).strip()
-    if uploaded is not None:
-        base = Path(uploaded.name).stem
-        base = re.sub(r"\s*\(\d+\)$", "", base)
-        base = base.replace("_UPLOAD", "").replace("_upload", "")
-        if base:
-            return sname(base)
-    return "maru-kra-final-clean"
-
-
-def read(p):
-    for enc in ("utf-8", "cp949", "euc-kr"):
-        try:
-            return Path(p).read_text(encoding=enc)
-        except Exception:
-            pass
-    return ""
-
-def write(p, txt):
-    Path(p).write_text(txt, encoding="utf-8")
-
-def unzip_upload(up, name):
-    pdir = STORE / sname(name)
-    if pdir.exists():
-        shutil.rmtree(pdir)
-    pdir.mkdir(parents=True)
-    raw = pdir / up.name
-    raw.write_bytes(up.getvalue())
-    src = pdir / "src"
-    src.mkdir()
-    if up.name.lower().endswith(".zip"):
-        with zipfile.ZipFile(raw) as z:
-            z.extractall(src)
-    else:
-        shutil.copy2(raw, src / up.name)
-    kids = list(src.iterdir())
-    if len(kids) == 1 and kids[0].is_dir():
-        inner = kids[0]
-        if (inner/"app.py").exists() or list(inner.glob("*.py")):
-            tmp = pdir/"src_inner"
-            shutil.move(str(inner), str(tmp))
-            shutil.rmtree(src)
-            tmp.rename(src)
-    return src
-
-def find_app(src):
-    src = Path(src)
-    for n in ["app.py", "streamlit_app.py", "main.py"]:
-        p = src / n
-        if p.exists():
-            return p
-    py = list(src.rglob("*.py"))
-    return py[0] if py else None
-
-def scan(src):
-    src = Path(src)
-    files, errors, suspicious = [], [], []
-    for p in src.rglob("*"):
-        if "__pycache__" in p.parts or ".git" in p.parts or not p.is_file():
-            continue
-        rel = str(p.relative_to(src))
-        files.append({"path": rel, "size": p.stat().st_size})
-        low = p.name.lower()
-        if any(x in low for x in ["error", "log", "traceback", "debug"]):
-            errors.append(rel)
-        if p.suffix.lower() in [".env", ".pem", ".key"] or p.name == "secrets.toml":
-            suspicious.append(rel)
-    return {
-        "file_count": len(files),
-        "has_app_py": any(f["path"].endswith("app.py") for f in files),
-        "has_requirements": any(f["path"].endswith("requirements.txt") for f in files),
-        "error_files": errors,
-        "suspicious_files": suspicious,
-        "files": files[:500]
-    }
-
-def syntax_all(src):
-    rows = []
-    for p in Path(src).rglob("*.py"):
-        if "__pycache__" in p.parts or ".git" in p.parts:
-            continue
-        r = subprocess.run([sys.executable, "-m", "py_compile", str(p)], capture_output=True, text=True)
-        rows.append({"file": str(p.relative_to(src)), "ok": r.returncode == 0, "message": "OK" if r.returncode == 0 else r.stderr[-2000:]})
-    return rows
-
-def analyze_app(app_path):
-    txt = read(app_path) if app_path and Path(app_path).exists() else ""
-    if not txt:
-        return {"features": ["app.py 없음"], "risks": ["app.py를 찾지 못함"]}
-    features = []
-    if "streamlit" in txt or "st." in txt: features.append("Streamlit UI")
-    if "requests" in txt or ".get(" in txt: features.append("API 호출")
-    if "timeout=" in txt: features.append("timeout 설정")
-    if "try:" in txt and "except" in txt: features.append("오류 처리")
-    if "download_button" in txt or "zipfile" in txt: features.append("다운로드/ZIP")
-    if "file_uploader" in txt: features.append("파일 업로드")
-    if "경마" in txt or "KRA" in txt or "horse" in txt: features.append("경마 관련")
-    if "토토" in txt or "sports" in txt or "odds" in txt: features.append("토토/스포츠 관련")
-    risks = []
-    if re.search(r"(api[_-]?key|serviceKey|token)\s*=\s*['\"][A-Za-z0-9_\-]{16,}", txt, re.I):
-        risks.append("API 키가 코드에 직접 들어갔을 가능성")
-    if ".get(" in txt and "timeout=" not in txt:
-        risks.append("API timeout 부족 가능성")
-    if "자동구매" in txt or "자동결제" in txt:
-        risks.append("자동구매/자동결제 문구 있음 - 차단 권장")
-    if "openai" in txt.lower() or "audio_input" in txt.lower():
-        risks.append("음성/OpenAI 코드가 남아 있음 - 제거 권장")
-    try:
-        ast.parse(txt)
-    except Exception as e:
-        risks.append("문법 오류: " + str(e))
-    return {"features": features or ["기능 추출 부족"], "risks": risks or ["큰 위험 없음"], "lines": len(txt.splitlines())}
-
-def parse_log(txt):
-    t = (txt or "").lower()
-    rec, patches = [], set()
-    rules = [
-        ("agent-card", ["html_render_fix", "mobile_ui"], "HTML 카드 코드 노출"),
-        ("<div", ["html_render_fix", "mobile_ui"], "HTML 코드가 화면에 보임"),
-        ("추천 없음", ["race_schedule_fallback", "debug_panel", "kra_helper"], "경마시간 추천없음 표시 보정"),
-        ("todayrace", ["race_schedule_fallback", "debug_panel", "kra_helper"], "공식 경주 일정과 앱 표시 불일치"),
-        ("제주", ["race_schedule_fallback", "debug_panel", "kra_helper"], "경마장 자동 감지 보정"),
-        ("nameerror", ["error_logger", "debug_panel"], "정의되지 않은 변수"),
-        ("keyerror", ["error_logger", "debug_panel"], "키 누락"),
-        ("http 500", ["api_timeout", "debug_panel"], "서버/API 오류"),
-        ("http 403", ["api_key_guard", "debug_panel"], "권한 문제"),
-        ("http 401", ["api_key_guard", "debug_panel"], "키 인증 문제"),
-        ("http 404", ["api_timeout", "debug_panel"], "URL 오류"),
-        ("timeout", ["api_timeout", "debug_panel"], "타임아웃"),
-        ("connectionerror", ["api_timeout", "debug_panel"], "통신두절"),
-        ("modulenotfounderror", ["debug_panel"], "requirements 누락"),
-        ("data[]", ["debug_panel"], "데이터 0건"),
-        ("no result", ["debug_panel"], "데이터 없음"),
-        ("통신두절", ["api_timeout", "debug_panel"], "통신두절"),
-        ("오류", ["error_logger", "debug_panel"], "오류 기록 필요"),
-    ]
-    for key, ps, reason in rules:
-        if key in t:
-            rec.append({"keyword": key, "reason": reason, "patches": ps})
-            patches.update(ps)
-    return {"findings": rec or [{"keyword":"없음","reason":"명확한 오류 패턴 없음","patches":[]}], "recommended_patches": sorted(patches)}
-
-def inspect_error_files(src):
-    rows = []
-    for p in Path(src).rglob("*"):
-        if p.is_file() and "__pycache__" not in p.parts and any(x in p.name.lower() for x in ["error", "log", "traceback", "debug"]):
-            txt = read(p)
-            rows.append({"file": str(p.relative_to(src)), "preview": txt[:1200], "analysis": parse_log(txt)})
-    return rows
-
-
-
-def save_uploaded_images(project_name, uploads):
-    saved = []
-    folder = IMAGE_STORE / sname(project_name)
-    folder.mkdir(parents=True, exist_ok=True)
-    for up in uploads or []:
-        suffix = Path(up.name).suffix.lower() or ".png"
-        fname = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{sname(Path(up.name).stem)}{suffix}"
-        p = folder / fname
-        data = up.getvalue()
-        p.write_bytes(data)
-        saved.append({
-            "name": up.name,
-            "saved_path": str(p),
-            "size": len(data),
-            "suffix": suffix,
-        })
-    return saved
-
-def analyze_image_command(command_text, saved_images):
-    cmd = (command_text or "").lower()
-    patches = set()
-    findings = []
-    if any(k in cmd for k in ["모바일", "폰", "화면", "작", "안보", "글씨", "버튼"]):
-        patches.update(["mobile_ui", "debug_panel"])
-        findings.append({"reason": "모바일 화면/버튼/글씨 개선 명령", "patches": ["mobile_ui", "debug_panel"]})
-    if any(k in cmd for k in ["오류", "에러", "traceback", "빨간", "멈춤", "안됨", "안되"]):
-        patches.update(["error_logger", "debug_panel"])
-        findings.append({"reason": "화면 오류/정지/에러 명령", "patches": ["error_logger", "debug_panel"]})
-    if any(k in cmd for k in ["html", "div", "agent-card", "카드", "코드", "그대로"]):
-        patches.update(["html_render_fix", "mobile_ui"])
-        findings.append({"reason": "HTML 카드 코드 노출 명령", "patches": ["html_render_fix", "mobile_ui"]})
-    if any(k in cmd for k in ["경마시간", "추천 없음", "추천없음", "제주", "서울", "부산", "경주", "todayrace"]):
-        patches.update(["race_schedule_fallback", "debug_panel", "kra_helper"])
-        findings.append({"reason": "경마시간/추천없음/경주표시 명령", "patches": ["race_schedule_fallback", "debug_panel", "kra_helper"]})
-    if any(k in cmd for k in ["api", "통신", "500", "403", "404", "401", "timeout", "데이터", "실시간"]):
-        patches.update(["api_timeout", "debug_panel", "api_key_guard"])
-        findings.append({"reason": "API/통신/실시간 관련 명령", "patches": ["api_timeout", "debug_panel", "api_key_guard"]})
-    if any(k in cmd for k in ["다운로드", "zip", "압축", "파일"]):
-        patches.update(["zip_export", "debug_panel"])
-        findings.append({"reason": "파일/ZIP/다운로드 관련 명령", "patches": ["zip_export", "debug_panel"]})
-    if any(k in cmd for k in ["경마", "kra", "마사회"]):
-        patches.update(["kra_helper", "debug_panel"])
-        findings.append({"reason": "경마/KRA 관련 명령", "patches": ["kra_helper", "debug_panel"]})
-    if any(k in cmd for k in ["토토", "스포츠", "축구", "배당", "odds"]):
-        patches.update(["toto_helper", "debug_panel"])
-        findings.append({"reason": "토토/스포츠 관련 명령", "patches": ["toto_helper", "debug_panel"]})
-    if not findings:
-        patches.update(["debug_panel", "error_logger"])
-        findings.append({"reason": "일반 사진/명령 분석: 디버그와 오류기록 우선 추천", "patches": ["debug_panel", "error_logger"]})
-    return {
-        "image_count": len(saved_images or []),
-        "images": saved_images,
-        "command": command_text,
-        "findings": findings,
-        "recommended_patches": sorted(patches),
-    }
-
-
-def decode_uploaded_log(uploaded_file):
-    if uploaded_file is None:
-        return ""
-    raw = uploaded_file.getvalue()
-    for enc in ("utf-8", "cp949", "euc-kr"):
-        try:
-            return raw.decode(enc)
-        except Exception:
-            pass
-    return raw.decode("utf-8", errors="ignore")
-
-
-def test_url(label, url, key=""):
-    today = datetime.now().strftime("%Y%m%d")
-    dash = datetime.now().strftime("%Y-%m-%d")
-    final = url.replace("{api_key}", key or "").replace("{serviceKey}", key or "").replace("{token}", key or "").replace("{today}", today).replace("{today_dash}", dash)
-    out = {"label": label, "ok": False, "status_code": None, "error": "", "data_count": None, "preview": ""}
-    try:
-        r = requests.get(final, timeout=15)
-        out["ok"] = r.ok; out["status_code"] = r.status_code
-        try:
-            data = r.json()
-            if isinstance(data, dict) and isinstance(data.get("data"), list):
-                out["data_count"] = len(data["data"])
-            out["preview"] = json.dumps(data, ensure_ascii=False)[:1200]
-        except Exception:
-            out["preview"] = r.text[:1200]
-    except Exception as e:
-        out["error"] = str(e)
-    return out
-
-def analyze_tests(rows):
-    patches, findings = set(), []
-    for r in rows:
-        stc = r.get("status_code")
-        if r.get("error"):
-            patches.update(["api_timeout", "debug_panel", "error_logger"])
-            findings.append({"target": r["label"], "problem": "통신두절", "patches": ["api_timeout", "debug_panel"]})
-        elif stc in [401,403]:
-            patches.update(["api_key_guard", "debug_panel"])
-            findings.append({"target": r["label"], "problem": f"HTTP {stc}", "patches": ["api_key_guard", "debug_panel"]})
-        elif stc == 404 or (stc and stc >= 500):
-            patches.update(["api_timeout", "debug_panel"])
-            findings.append({"target": r["label"], "problem": f"HTTP {stc}", "patches": ["api_timeout", "debug_panel"]})
-        elif r.get("ok") and r.get("data_count") == 0:
-            patches.add("debug_panel")
-            findings.append({"target": r["label"], "problem": "데이터 0건", "patches": ["debug_panel"]})
-    return {"findings": findings or [{"problem": "큰 문제 없음"}], "recommended_patches": sorted(patches)}
-
-def ensure_req(src):
-    p = Path(src)/"requirements.txt"
-    cur = [x.strip() for x in read(p).splitlines() if x.strip()] if p.exists() else []
-    for pkg in ["streamlit", "pandas", "numpy", "requests"]:
-        if pkg.lower() not in {x.lower() for x in cur}:
-            cur.append(pkg)
-    write(p, "\n".join(cur)+"\n")
-
-def apply_patch(app_path, approved):
-    app_path = Path(app_path)
-    txt = read(app_path)
-    write(app_path.with_suffix(".before_upgrade.py"), txt)
-    top, bottom = [], []
-    if "html_render_fix" in approved:
-        for a,b in [("st.code(agent_html)", "st.markdown(agent_html, unsafe_allow_html=True)"), ("st.text(agent_html)", "st.markdown(agent_html, unsafe_allow_html=True)"), ("st.write(agent_html)", "st.markdown(agent_html, unsafe_allow_html=True)"), ("st.code(card_html)", "st.markdown(card_html, unsafe_allow_html=True)"), ("st.text(card_html)", "st.markdown(card_html, unsafe_allow_html=True)"), ("st.write(card_html)", "st.markdown(card_html, unsafe_allow_html=True)"), ("st.code(html)", "st.markdown(html, unsafe_allow_html=True)"), ("st.text(html)", "st.markdown(html, unsafe_allow_html=True)")]:
-            txt = txt.replace(a,b)
-    if "mobile_ui" in approved and "MARU_MOBILE_UI" not in txt:
-        if "st.set_page_config" not in txt:
-            top.append("st.set_page_config(page_title='업그레이드 앱', layout='wide')\n")
-        top.append("st.markdown('<style>/* MARU_MOBILE_UI */ .block-container{padding-top:1rem;max-width:1200px}.stButton>button{height:3rem;font-weight:800} textarea,input{font-size:1.02rem!important}</style>', unsafe_allow_html=True)\n")
-    if any(x in approved for x in ["error_logger","debug_panel","api_timeout","zip_export"]) and "MARU_COMMON_IMPORTS" not in txt:
-        top.append("from pathlib import Path as _maru_Path\nfrom datetime import datetime as _maru_datetime\nimport json as _maru_json\n")
-    if "error_logger" in approved and "MARU_ERROR_LOGGER" not in txt:
-        top.append("""
 # MARU_ERROR_LOGGER
 _MARU_ERROR_LOG = _maru_Path(__file__).parent / 'error_log.json'
 def maru_log_error(where, err):
@@ -375,9 +36,8 @@ def maru_log_error(where, err):
         old.append(rec); _MARU_ERROR_LOG.write_text(_maru_json.dumps(old[-500:],ensure_ascii=False,indent=2),encoding='utf-8')
     except Exception: pass
     return rec
-""")
-    if "api_timeout" in approved and "MARU_SAFE_GET" not in txt:
-        top.append("""
+
+
 # MARU_SAFE_GET
 def maru_safe_get(url, params=None, headers=None, timeout=15):
     import requests as _r
@@ -389,676 +49,591 @@ def maru_safe_get(url, params=None, headers=None, timeout=15):
     except Exception as e:
         if 'maru_log_error' in globals(): maru_log_error('maru_safe_get', e)
         return {'ok':False,'status_code':'CONNECTION_ERROR','error':str(e)}, None
-""")
-    if "api_key_guard" in approved and "MARU_API_KEY_GUARD" not in txt:
-        bottom.append("with st.expander('🔐 API KEY 보안 안내'):\n    st.warning('API KEY는 app.py에 직접 넣지 마세요. Streamlit Secrets 또는 입력창을 사용하세요.')\n")
-    if "debug_panel" in approved and "MARU_DEBUG_PANEL" not in txt:
-        bottom.append("""
-with st.expander('🧯 MARU 디버그 패널'):
-    try:
-        _log=_maru_Path(__file__).parent/'error_log.json'
-        st.json(_maru_json.loads(_log.read_text(encoding='utf-8'))[-30:] if _log.exists() else [])
-    except Exception as e: st.warning(e)
-""")
-    if "zip_export" in approved and "MARU_ZIP_EXPORT" not in txt:
-        bottom.append("""
-with st.expander('📦 현재 앱 ZIP 다운로드'):
-    try:
-        import zipfile as _z, io as _io
-        root=_maru_Path(__file__).parent; buf=_io.BytesIO()
-        with _z.ZipFile(buf,'w',_z.ZIP_DEFLATED) as zz:
-            for p in root.rglob('*'):
-                if '__pycache__' not in p.parts and '.git' not in p.parts and p.is_file(): zz.write(p,p.relative_to(root))
-        st.download_button('현재 앱 ZIP 다운로드', buf.getvalue(), 'current_app_export.zip', 'application/zip', use_container_width=True)
-    except Exception as e: st.warning(e)
-""")
-    if "race_schedule_fallback" in approved and "MARU_RACE_FALLBACK_NOTE" not in txt:
-        bottom.append("with st.expander('🐎 경마 추천 없음 보정 안내'):\n    st.info('추천 파일이 비어 있어도 공식 경주 일정이 있으면 경주 있음 / 추천 생성 대기 / 수집 필요로 표시되도록 보정 파일을 추가했습니다.')\n")
-    if top:
-        txt = txt.replace("import streamlit as st", "import streamlit as st\n" + "\n".join(top), 1) if "import streamlit as st" in txt else "import streamlit as st\n" + "\n".join(top) + "\n" + txt
-    if bottom:
-        txt += "\n\n# ===== MARU V13 PATCH ADDONS =====\n" + "\n".join(bottom)
-    write(app_path, txt)
-
-def add_helpers(src, approved):
-    src = Path(src)
-    if "kra_helper" in approved:
-        write(src/"kra_api_debug_helper.py", "import streamlit as st, requests\nst.title('🐎 경마 API 점검')\nurl=st.text_area('URL')\nkey=st.text_input('KEY',type='password')\nif st.button('점검'):\n    try:\n        r=requests.get(url.replace('{serviceKey}',key).replace('{api_key}',key),timeout=15); st.metric('HTTP',r.status_code); st.text(r.text[:5000])\n    except Exception as e: st.error(e)\n")
-    if "toto_helper" in approved:
-        write(src/"toto_api_debug_helper.py", "import streamlit as st, requests\nst.title('⚽ 토토/스포츠 API 점검')\nurl=st.text_area('URL')\ntoken=st.text_input('TOKEN',type='password')\nif st.button('점검'):\n    try:\n        r=requests.get(url.replace('{token}',token).replace('{api_key}',token),timeout=15); st.metric('HTTP',r.status_code); st.text(r.text[:5000])\n    except Exception as e: st.error(e)\n")
-    if "race_schedule_fallback" in approved:
-        write(src/"maru_race_schedule_fallback.py", "from datetime import datetime\n\ndef maru_race_status_fallback(recommend_data=None, race_hint=None):\n    if recommend_data:\n        return {'status':'추천 있음','message':'저장된 추천 표시','data':recommend_data}\n    if race_hint:\n        return {'status':'경주 있음 / 추천 생성 대기','message':f'{race_hint} 경주 일정 감지. 수집/분석 후 추천 표시','data':None}\n    return {'status':'추천 대기','message':'경주 일정 수집 또는 추천 생성 필요','data':None}\n")
 
 
+APP_NAME = "MARU KRA 실시간 분석"
+CONFIG_DIR = ".maru_kra"
+CONFIG_PATH = os.path.join(CONFIG_DIR, "config.json")
+HISTORY_PATH = os.path.join(CONFIG_DIR, "history.csv")
+KST = timezone(timedelta(hours=9))
 
-def get_gsheet_config(mem):
-    return mem.setdefault("google_sheets", {"enabled": False, "sheet_id": "", "service_account_json": ""})
+# 공식 구매/이용 페이지는 사용자가 직접 확인하고 진행하는 수동 링크입니다.
+KRA_MAIN_URL = "https://www.kra.co.kr/"
+KRA_BETTING_URL = "https://www.kra.co.kr/"
 
-def gsheet_append(mem, tab_name, row):
-    cfg = get_gsheet_config(mem)
-    if not cfg.get("enabled"):
-        return False, "구글시트 꺼짐"
-    try:
-        import gspread
-        from google.oauth2.service_account import Credentials
-        info = json.loads(cfg.get("service_account_json", ""))
-        creds = Credentials.from_service_account_info(
-            info,
-            scopes=[
-                "https://www.googleapis.com/auth/spreadsheets",
-                "https://www.googleapis.com/auth/drive",
-            ],
-        )
-        ss = gspread.authorize(creds).open_by_key(cfg.get("sheet_id", ""))
+DEFAULT_API_URLS = [
+    {"name": "경마경주정보", "enabled": True, "url": "https://apis.data.go.kr/B551015/API310/race?serviceKey={serviceKey}&pageNo=1&numOfRows=100&_type=json&meet={meet}&rcDate={today}"},
+    {"name": "RC경마경주정보", "enabled": True, "url": "https://apis.data.go.kr/B551015/API310/rcRace?serviceKey={serviceKey}&pageNo=1&numOfRows=100&_type=json&meet={meet}&rcDate={today}"},
+    {"name": "출전표/엔트리", "enabled": True, "url": "https://apis.data.go.kr/B551015/API310/entry?serviceKey={serviceKey}&pageNo=1&numOfRows=300&_type=json&meet={meet}&rcDate={today}"},
+    {"name": "경주마정보", "enabled": True, "url": "https://apis.data.go.kr/B551015/API310/horse?serviceKey={serviceKey}&pageNo=1&numOfRows=300&_type=json&meet={meet}"},
+    {"name": "경주마정보_영문추가", "enabled": True, "url": "https://apis.data.go.kr/B551015/API310/horseEng?serviceKey={serviceKey}&pageNo=1&numOfRows=300&_type=json&meet={meet}"},
+    {"name": "기수정보", "enabled": True, "url": "https://apis.data.go.kr/B551015/API310/jockey?serviceKey={serviceKey}&pageNo=1&numOfRows=300&_type=json&meet={meet}"},
+    {"name": "조교사정보", "enabled": True, "url": "https://apis.data.go.kr/B551015/API310/trainer?serviceKey={serviceKey}&pageNo=1&numOfRows=300&_type=json&meet={meet}"},
+    {"name": "마주정보", "enabled": False, "url": "https://apis.data.go.kr/B551015/API310/owner?serviceKey={serviceKey}&pageNo=1&numOfRows=300&_type=json&meet={meet}"},
+    {"name": "경주결과종합", "enabled": True, "url": "https://apis.data.go.kr/B551015/API310/result?serviceKey={serviceKey}&pageNo=1&numOfRows=300&_type=json&meet={meet}&rcDate={today}"},
+    {"name": "확정배당율종합", "enabled": True, "url": "https://apis.data.go.kr/B551015/API310/dividend?serviceKey={serviceKey}&pageNo=1&numOfRows=300&_type=json&meet={meet}&rcDate={today}"},
+    {"name": "코너별통과순위_주로빠르기", "enabled": True, "url": "https://apis.data.go.kr/B551015/API310/corner?serviceKey={serviceKey}&pageNo=1&numOfRows=300&_type=json&meet={meet}&rcDate={today}"},
+    {"name": "경마매출정보", "enabled": False, "url": "https://apis.data.go.kr/B551015/API310/sales?serviceKey={serviceKey}&pageNo=1&numOfRows=300&_type=json&meet={meet}&rcDate={today}"},
+    {"name": "마체중정보", "enabled": True, "url": "https://apis.data.go.kr/B551015/API310/weight?serviceKey={serviceKey}&pageNo=1&numOfRows=300&_type=json&meet={meet}&rcDate={today}"},
+    {"name": "출전마최근성적", "enabled": True, "url": "https://apis.data.go.kr/B551015/API310/recent?serviceKey={serviceKey}&pageNo=1&numOfRows=300&_type=json&meet={meet}&rcDate={today}"},
+    {"name": "경주마혈통", "enabled": False, "url": "https://apis.data.go.kr/B551015/API310/pedigree?serviceKey={serviceKey}&pageNo=1&numOfRows=300&_type=json&meet={meet}"},
+    {"name": "주로상태", "enabled": True, "url": "https://apis.data.go.kr/B551015/API310/track?serviceKey={serviceKey}&pageNo=1&numOfRows=300&_type=json&meet={meet}&rcDate={today}"},
+    {"name": "날씨정보", "enabled": True, "url": "https://apis.data.go.kr/B551015/API310/weather?serviceKey={serviceKey}&pageNo=1&numOfRows=100&_type=json&meet={meet}&rcDate={today}"},
+    {"name": "기상특보 조회서비스", "enabled": False, "url": "https://apis.data.go.kr/1360000/WthrWrnInfoService/getWthrWrnList?serviceKey={serviceKey}&pageNo=1&numOfRows=100&dataType=JSON&fromTmFc={today}&toTmFc={today}"},
+    {"name": "전국 승마장 정보", "enabled": False, "url": "https://apis.data.go.kr/B551015/API310/ridingClub?serviceKey={serviceKey}&pageNo=1&numOfRows=100&_type=json"},
+]
+
+MEET_MAP = {
+    "서울": "1",
+    "제주": "2",
+    "부산경남": "3",
+}
+
+BET_TYPES = ["복승 참고", "쌍승 참고", "삼복승 참고", "고배당 관찰"]
+
+st.set_page_config(page_title=APP_NAME, page_icon="🏇", layout="wide", initial_sidebar_state="collapsed")
+
+CSS = """
+<style>
+:root { --bg:#0f172a; --card:#111827; --soft:#1f2937; --txt:#f8fafc; --muted:#cbd5e1; --accent:#facc15; --good:#22c55e; --warn:#fb923c; --bad:#ef4444; }
+[data-testid="stAppViewContainer"] { background: linear-gradient(180deg, #0f172a 0%, #111827 55%, #020617 100%); }
+[data-testid="stHeader"] { background: rgba(15, 23, 42, 0); }
+.block-container { padding-top: 1.0rem; padding-bottom: 2rem; max-width: 1100px; }
+.hero { border-radius: 22px; padding: 22px; background: linear-gradient(135deg, rgba(250,204,21,.23), rgba(59,130,246,.12)); border: 1px solid rgba(250,204,21,.35); }
+.hero h1 { font-size: clamp(2.0rem, 7vw, 4.2rem); margin:0; color:#fff; letter-spacing:-1px; }
+.hero p { color:#e5e7eb; font-size: 1.05rem; margin:.4rem 0 0 0; }
+.big-card { padding: 20px; border-radius: 22px; background: rgba(17,24,39,.9); border: 1px solid rgba(255,255,255,.10); box-shadow: 0 12px 40px rgba(0,0,0,.25); }
+.pick { font-size: clamp(2.6rem, 11vw, 5.5rem); color: #facc15; font-weight: 900; line-height:1; letter-spacing:-2px; }
+.sub { color:#cbd5e1; font-size:1rem; }
+.badge { display:inline-block; padding: 6px 12px; border-radius: 999px; background:rgba(250,204,21,.16); border:1px solid rgba(250,204,21,.30); color:#fde68a; font-weight:700; margin:3px; }
+.green { color:#86efac; font-weight:800; }
+.orange { color:#fdba74; font-weight:800; }
+.red { color:#fca5a5; font-weight:800; }
+.small-note { color:#cbd5e1; font-size:.92rem; }
+.stButton > button { border-radius: 14px; min-height: 48px; font-weight: 800; }
+[data-testid="stMetricValue"] { color:#fff; font-size:2rem; }
+[data-testid="stMetricLabel"] { color:#cbd5e1; }
+div[data-testid="stDataFrame"] { border-radius: 16px; overflow:hidden; }
+hr { border-color: rgba(255,255,255,.13); }
+</style>
+"""
+st.markdown(CSS, unsafe_allow_html=True)
+
+
+def now_kst() -> datetime:
+    return datetime.now(KST)
+
+
+def today_str() -> str:
+    return now_kst().strftime("%Y%m%d")
+
+
+def ensure_dir() -> None:
+    os.makedirs(CONFIG_DIR, exist_ok=True)
+
+
+def load_config() -> Dict[str, Any]:
+    ensure_dir()
+    if os.path.exists(CONFIG_PATH):
         try:
-            ws = ss.worksheet(tab_name)
-        except Exception:
-            ws = ss.add_worksheet(title=tab_name, rows=1000, cols=10)
-            ws.append_row(["time", "type", "project", "version", "status", "summary", "data_json"])
-        ws.append_row(
-            [
-                row.get("time", datetime.now().isoformat(timespec="seconds")),
-                row.get("type", tab_name),
-                row.get("project", ""),
-                str(row.get("version", "")),
-                row.get("status", ""),
-                row.get("summary", ""),
-                json.dumps(row, ensure_ascii=False)[:45000],
-            ],
-            value_input_option="USER_ENTERED",
-        )
-        return True, "구글시트 저장 완료"
-    except Exception as e:
-        return False, str(e)
-
-def save_event(mem, tab, row):
-    ok, msg = gsheet_append(mem, tab, row)
-    mem.setdefault("lessons", []).append({
-        "time": datetime.now().isoformat(timespec="seconds"),
-        "lesson": f"{tab}: {msg}",
-    })
-    return ok, msg
-
-
-def generate_streamlit_project(project_name, goal, app_kind="기본앱"):
-    """외부 유료 AI API 없이 템플릿 기반 Streamlit 앱을 생성합니다."""
-    pname = sname(project_name or "generated-app")
-    out = GENERATED / pname
-    if out.exists():
-        shutil.rmtree(out)
-    out.mkdir(parents=True, exist_ok=True)
-
-    safe_goal = (goal or "사용자 목표 앱").strip()
-    title = project_name or "MARU Generated App"
-
-    app_code = f"""import streamlit as st
-import pandas as pd
-import numpy as np
-import requests
-from pathlib import Path
-from datetime import datetime
-import json
-
-st.set_page_config(page_title={title!r}, page_icon="🧠", layout="wide")
-
-DATA_DIR = Path(__file__).parent / "data"
-DATA_DIR.mkdir(exist_ok=True)
-MEMORY_FILE = DATA_DIR / "memory.json"
-
-def load_memory():
-    if MEMORY_FILE.exists():
-        try:
-            return json.loads(MEMORY_FILE.read_text(encoding="utf-8"))
+            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+            if "api_urls" not in cfg:
+                cfg["api_urls"] = DEFAULT_API_URLS
+            return cfg
         except Exception:
             pass
-    return {{"records": [], "created_at": datetime.now().isoformat(timespec="seconds")}}
-
-def save_memory(m):
-    m["updated_at"] = datetime.now().isoformat(timespec="seconds")
-    MEMORY_FILE.write_text(json.dumps(m, ensure_ascii=False, indent=2), encoding="utf-8")
-
-def safe_get(url, timeout=15):
-    try:
-        r = requests.get(url, timeout=timeout)
-        info = {{"ok": r.ok, "status_code": r.status_code, "url": str(r.url)[:300]}}
-        try:
-            return info, r.json()
-        except Exception:
-            return info, {{"text_preview": r.text[:3000]}}
-    except Exception as e:
-        return {{"ok": False, "error": str(e)}}, None
-
-st.title("🧠 " + {title!r})
-st.caption("MARU 자동 생성 앱 / 기존 기능 삭제 금지 / 수동 확인 중심")
-st.info({safe_goal!r})
-
-tab1, tab2, tab3, tab4 = st.tabs(["🏠 대시보드", "🔌 API 점검", "📝 기록", "📦 내보내기"])
-
-with tab1:
-    st.subheader("핵심 목표")
-    st.write({safe_goal!r})
-    st.metric("앱 종류", {app_kind!r})
-    st.metric("생성 시각", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-
-with tab2:
-    st.subheader("API 통신 점검")
-    url = st.text_area("API URL", height=120)
-    token = st.text_input("API KEY/TOKEN 선택", type="password")
-    if st.button("통신 점검", type="primary", use_container_width=True):
-        final_url = url.replace("{{api_key}}", token).replace("{{serviceKey}}", token).replace("{{token}}", token)
-        info, data = safe_get(final_url)
-        st.json(info)
-        if data is not None:
-            st.json(data)
-
-with tab3:
-    st.subheader("기록")
-    mem = load_memory()
-    memo = st.text_area("메모/테스트 결과")
-    if st.button("기록 저장", use_container_width=True):
-        mem.setdefault("records", []).append({{"time": datetime.now().isoformat(timespec="seconds"), "memo": memo}})
-        save_memory(mem)
-        st.success("저장 완료")
-    st.json(mem)
-
-with tab4:
-    st.subheader("내보내기")
-    st.write("GitHub/Streamlit 배포용 기본 파일이 포함된 앱입니다.")
-"""
-    req = "streamlit\npandas\nnumpy\nrequests\n"
-    readme = f"""# {title}
-
-MARU 진화형 AI 코드 생성기가 만든 Streamlit 앱입니다.
-
-## 목표
-
-{safe_goal}
-
-## 실행
-
-```bash
-pip install -r requirements.txt
-streamlit run app.py
-```
-
-Streamlit Cloud:
-
-```text
-Main file path: app.py
-```
-"""
-    memdata = {"project": title, "goal": safe_goal, "created_at": datetime.now().isoformat(timespec="seconds"), "records": []}
-    (out / "app.py").write_text(app_code, encoding="utf-8")
-    (out / "requirements.txt").write_text(req, encoding="utf-8")
-    (out / "README.md").write_text(readme, encoding="utf-8")
-    (out / "data").mkdir(exist_ok=True)
-    (out / "data" / "memory.json").write_text(json.dumps(memdata, ensure_ascii=False, indent=2), encoding="utf-8")
-    return out
-
-def register_generated_project(mem, project_name, src, app_url="", github_repo=""):
-    pname = sname(project_name)
-    app_path = find_app(src)
-    info = {
-        "name": pname,
-        "src": str(src),
-        "app_file": str(app_path) if app_path else "",
-        "app_url": app_url,
-        "api_key": "",
-        "api_urls": [],
-        "version": 0,
-        "github": {"owner": "skytins3-png", "repo": github_repo or pname, "branch": "main", "prefix": ""},
-        "scan": scan(src),
-        "syntax": syntax_all(src),
-        "errors": inspect_error_files(src),
-        "analysis": analyze_app(app_path)
+    return {
+        "service_key": "",
+        "meet": "서울",
+        "api_urls": DEFAULT_API_URLS,
+        "refresh_sec": 0,
+        "risk_mode": "균형형",
     }
-    mem.setdefault("projects", {})[pname] = info
-    mem.setdefault("generated_projects", []).append({
-        "time": datetime.now().isoformat(timespec="seconds"),
-        "project": pname,
-        "src": str(src),
-        "scan": info["scan"],
-        "analysis": info["analysis"]
-    })
-    save(mem)
-    return info
 
 
-def make_zip(src, name, ver):
-    out = VERS / f"{sname(name)}_v{ver:03d}_PATCHED.zip"
-    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
-        for p in Path(src).rglob("*"):
-            if "__pycache__" not in p.parts and ".git" not in p.parts and p.is_file():
-                z.write(p, p.relative_to(src))
-    return out
+def save_config(cfg: Dict[str, Any]) -> None:
+    ensure_dir()
+    with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+        json.dump(cfg, f, ensure_ascii=False, indent=2)
 
 
-def zip_bytes(src):
-    buf = io.BytesIO()
-    src = Path(src)
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
-        for p in src.rglob("*"):
-            if "__pycache__" in p.parts or ".git" in p.parts or not p.is_file():
-                continue
-            z.write(p, p.relative_to(src))
-    return buf.getvalue()
+def mask_key(key: str) -> str:
+    if not key:
+        return "미저장"
+    if len(key) <= 10:
+        return "저장됨"
+    return key[:4] + "***" + key[-4:]
 
-def gh_headers(token):
-    return {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"}
 
-def gh_repo(owner, repo, token):
-    r = requests.get(f"https://api.github.com/repos/{owner}/{repo}", headers=gh_headers(token), timeout=20)
-    try: data = r.json()
-    except Exception: data = {"text": r.text[:1000]}
-    return r.status_code, data
+def safe_float(v: Any, default: float = np.nan) -> float:
+    if v is None:
+        return default
+    try:
+        s = str(v).strip().replace(",", "")
+        if s in ["", "-", "nan", "None"]:
+            return default
+        m = re.search(r"-?\d+(?:\.\d+)?", s)
+        return float(m.group(0)) if m else default
+    except Exception:
+        return default
 
-def gh_sha(owner, repo, branch, path, token):
-    r = requests.get(f"https://api.github.com/repos/{owner}/{repo}/contents/{path}", headers=gh_headers(token), params={"ref": branch}, timeout=20)
-    return r.json().get("sha") if r.status_code == 200 else None
 
-def gh_put(owner, repo, branch, path, b, msg, token):
-    payload = {"message": msg, "content": base64.b64encode(b).decode(), "branch": branch}
-    sha = gh_sha(owner, repo, branch, path, token)
-    if sha: payload["sha"] = sha
-    r = requests.put(f"https://api.github.com/repos/{owner}/{repo}/contents/{path}", headers=gh_headers(token), json=payload, timeout=30)
-    try: data = r.json()
-    except Exception: data = {"text": r.text[:1000]}
-    return r.status_code in [200,201], r.status_code, data
+def safe_int(v: Any, default: int = 0) -> int:
+    x = safe_float(v, np.nan)
+    if np.isnan(x):
+        return default
+    return int(x)
 
-def gh_upload_folder(src, owner, repo, branch, token, msg, prefix=""):
+
+def extract_items(obj: Any) -> List[Dict[str, Any]]:
+    """공공데이터 JSON 구조가 제각각이어도 item 리스트를 최대한 찾아냅니다."""
+    if obj is None:
+        return []
+    if isinstance(obj, list):
+        out = []
+        for x in obj:
+            if isinstance(x, dict):
+                out.append(x)
+        return out
+    if not isinstance(obj, dict):
+        return []
+
+    candidates = []
+    def walk(x: Any):
+        if isinstance(x, dict):
+            for k, v in x.items():
+                if k.lower() in ["item", "items"]:
+                    candidates.append(v)
+                walk(v)
+        elif isinstance(x, list):
+            for y in x:
+                walk(y)
+    walk(obj)
+
+    for c in candidates:
+        if isinstance(c, list):
+            return [i for i in c if isinstance(i, dict)]
+        if isinstance(c, dict):
+            return [c]
+    # fallback: dict 자체가 행처럼 보이면 1건 처리
+    if any(k.lower() in obj for k in ["rcno", "hrno", "hrname", "chulno", "jkname"]):
+        return [obj]
+    return []
+
+
+def build_url(template: str, service_key: str, meet: str) -> str:
+    meet_code = MEET_MAP.get(meet, "1")
+    replacements = {
+        "{serviceKey}": quote_plus(service_key),
+        "{service_key}": quote_plus(service_key),
+        "{today}": today_str(),
+        "{date}": today_str(),
+        "{meet}": meet_code,
+        "{meetName}": quote_plus(meet),
+        "{kst}": now_kst().strftime("%Y%m%d%H%M%S"),
+    }
+    url = template
+    for k, v in replacements.items():
+        url = url.replace(k, v)
+    return url
+
+
+def fetch_one(api: Dict[str, Any], service_key: str, meet: str, timeout: int = 10) -> Tuple[str, List[Dict[str, Any]], str]:
+    name = api.get("name", "API")
+    if not api.get("enabled", True):
+        return name, [], "OFF"
+    template = api.get("url", "")
+    if not template:
+        return name, [], "URL 없음"
+    try:
+        url = build_url(template, service_key, meet)
+        r = requests.get(url, timeout=timeout, headers={"User-Agent": "MARU-KRA-Mobile/1.0"})
+        if r.status_code != 200:
+            return name, [], f"HTTP {r.status_code}"
+        text = r.text.strip()
+        try:
+            data = r.json()
+        except Exception:
+            # XML이나 오류문이면 일부 메시지만 반환
+            return name, [], "JSON 아님: " + text[:80]
+        items = extract_items(data)
+        return name, items, f"OK {len(items)}건"
+    except requests.Timeout:
+        return name, [], "시간초과"
+    except Exception as e:
+        return name, [], f"오류: {str(e)[:80]}"
+
+
+def fetch_all(cfg: Dict[str, Any]) -> Tuple[Dict[str, pd.DataFrame], pd.DataFrame]:
+    service_key = cfg.get("service_key", "")
+    meet = cfg.get("meet", "서울")
+    dfs: Dict[str, pd.DataFrame] = {}
+    logs = []
+    for api in cfg.get("api_urls", DEFAULT_API_URLS):
+        name, items, status = fetch_one(api, service_key, meet)
+        df = pd.DataFrame(items)
+        if not df.empty:
+            df["_source"] = name
+        dfs[name] = df
+        logs.append({"API": name, "상태": status, "건수": len(df), "시간": now_kst().strftime("%H:%M:%S")})
+    return dfs, pd.DataFrame(logs)
+
+
+def find_col(df: pd.DataFrame, names: List[str]) -> str:
+    if df is None or df.empty:
+        return ""
+    lower_map = {c.lower(): c for c in df.columns}
+    for n in names:
+        if n in df.columns:
+            return n
+        if n.lower() in lower_map:
+            return lower_map[n.lower()]
+    for c in df.columns:
+        cl = c.lower()
+        for n in names:
+            if n.lower() in cl:
+                return c
+    return ""
+
+
+def normalize_entries(dfs: Dict[str, pd.DataFrame]) -> pd.DataFrame:
+    # 출전표가 있으면 우선 사용, 없으면 모든 DF에서 말/기수 비슷한 컬럼을 가진 것 합치기
+    preferred_names = ["출전표/엔트리", "경마경주정보", "RC경마경주정보"]
+    frames = []
+    for name in preferred_names:
+        df = dfs.get(name, pd.DataFrame())
+        if not df.empty:
+            frames.append(df.copy())
+    if not frames:
+        for _, df in dfs.items():
+            if not df.empty:
+                hr_col = find_col(df, ["hrName", "hrname", "horseName", "말명", "마명"])
+                if hr_col:
+                    frames.append(df.copy())
+    if not frames:
+        return pd.DataFrame()
+
+    raw = pd.concat(frames, ignore_index=True, sort=False).drop_duplicates()
+    rc_col = find_col(raw, ["rcNo", "rcno", "raceNo", "경주번호"])
+    chul_col = find_col(raw, ["chulNo", "chulno", "gate", "번호", "마번"])
+    hr_col = find_col(raw, ["hrName", "hrname", "horseName", "말명", "마명"])
+    jk_col = find_col(raw, ["jkName", "jkname", "jockey", "기수명", "기수"])
+    tr_col = find_col(raw, ["trName", "trname", "trainer", "조교사"])
+    age_col = find_col(raw, ["age", "hrAge", "연령", "나이"])
+    wg_col = find_col(raw, ["wgBudam", "weight", "중량", "부담중량"])
+    rc_time_col = find_col(raw, ["rcTime", "rctime", "raceTime", "경주시간", "시간"])
+    dist_col = find_col(raw, ["rcDist", "distance", "거리"])
+    odds_col = find_col(raw, ["winOdds", "plcOdds", "odds", "배당", "배당률"])
+    rank_col = find_col(raw, ["ord", "rank", "recentRank", "순위", "착순"])
+
+    n = len(raw)
+    out = pd.DataFrame()
+    out["경주"] = raw[rc_col].apply(lambda x: safe_int(x, 1)) if rc_col else 1
+    out["마번"] = raw[chul_col].apply(lambda x: safe_int(x, 0)) if chul_col else np.arange(1, n + 1)
+    out["말이름"] = raw[hr_col].astype(str) if hr_col else [f"출전마{i}" for i in range(1, n + 1)]
+    out["기수"] = raw[jk_col].astype(str) if jk_col else "미확인"
+    out["조교사"] = raw[tr_col].astype(str) if tr_col else "미확인"
+    out["나이"] = raw[age_col].apply(lambda x: safe_int(x, 4)) if age_col else 4
+    out["부담중량"] = raw[wg_col].apply(lambda x: safe_float(x, 55.0)) if wg_col else 55.0
+    out["경주시간"] = raw[rc_time_col].astype(str) if rc_time_col else "시간미정"
+    out["거리"] = raw[dist_col].apply(lambda x: safe_int(x, 1200)) if dist_col else 1200
+    out["배당"] = raw[odds_col].apply(lambda x: safe_float(x, np.nan)) if odds_col else np.nan
+    out["최근순위"] = raw[rank_col].apply(lambda x: safe_float(x, np.nan)) if rank_col else np.nan
+    out = out.drop_duplicates(subset=["경주", "마번", "말이름"], keep="first")
+    out = out[out["마번"] > 0]
+    if out.empty:
+        return pd.DataFrame()
+    return out.sort_values(["경주", "마번"]).reset_index(drop=True)
+
+
+def score_entries(entries: pd.DataFrame, risk_mode: str = "균형형") -> pd.DataFrame:
+    if entries.empty:
+        return entries
+    df = entries.copy()
+    # 기본 스코어: 실제 데이터 컬럼이 부족해도 앱이 죽지 않도록 안전 계산
+    gate = df["마번"].astype(float)
+    age = df["나이"].astype(float).replace(0, 4)
+    weight = df["부담중량"].astype(float).replace(0, 55)
+    odds = df["배당"].astype(float)
+    recent = df["최근순위"].astype(float)
+
+    gate_score = 100 - (gate.sub(6).abs() * 4).clip(0, 35)
+    age_score = 100 - (age.sub(4.5).abs() * 8).clip(0, 40)
+    weight_score = 100 - (weight.sub(54.5).abs() * 4).clip(0, 35)
+    recent_score = np.where(recent.notna(), 100 - ((recent.clip(1, 12) - 1) * 7), 62)
+    odds_score = np.where(odds.notna(), 100 - np.log1p(odds.clip(1, 80)) * 13, 62)
+    value_score = np.where(odds.notna(), np.log1p(odds.clip(1, 80)) * 22 + 42, 60)
+
+    if risk_mode == "안정형":
+        total = gate_score * .18 + age_score * .13 + weight_score * .14 + recent_score * .32 + odds_score * .23
+    elif risk_mode == "고배당형":
+        total = gate_score * .12 + age_score * .10 + weight_score * .10 + recent_score * .23 + odds_score * .10 + value_score * .35
+    else:
+        total = gate_score * .16 + age_score * .12 + weight_score * .12 + recent_score * .30 + odds_score * .16 + value_score * .14
+
+    # 같은 말명/기수명이 있으면 아주 약간 안정 보정. 실제 통계가 없을 때 중복 노이즈 방지 정도.
+    df["AI점수"] = np.round(np.clip(total, 0, 99), 1)
+    df["안정성"] = np.round((recent_score * .45 + odds_score * .25 + gate_score * .20 + weight_score * .10).clip(0, 99), 1)
+    df["배당매력"] = np.round(value_score.clip(0, 99), 1)
+    df["위험도"] = pd.cut(df["AI점수"], bins=[-1, 60, 75, 86, 100], labels=["높음", "보통", "낮음", "매우낮음"])
+    df["근거"] = df.apply(make_reason, axis=1)
+    return df.sort_values(["경주", "AI점수"], ascending=[True, False]).reset_index(drop=True)
+
+
+def make_reason(row: pd.Series) -> str:
+    reasons = []
+    if row.get("AI점수", 0) >= 85:
+        reasons.append("종합점수 상위")
+    if row.get("안정성", 0) >= 75:
+        reasons.append("안정성 양호")
+    if row.get("배당매력", 0) >= 75:
+        reasons.append("배당 대비 관찰")
+    if 2 <= row.get("마번", 0) <= 8:
+        reasons.append("게이트 무난")
+    if 3 <= row.get("나이", 0) <= 6:
+        reasons.append("연령대 무난")
+    return " · ".join(reasons[:4]) if reasons else "데이터 부족: 수동 확인 필요"
+
+
+def make_recommendations(scored: pd.DataFrame) -> pd.DataFrame:
+    if scored.empty:
+        return pd.DataFrame()
     rows = []
-    for p in Path(src).rglob("*"):
-        if "__pycache__" in p.parts or ".git" in p.parts or not p.is_file(): continue
-        if ".github" in p.parts and "workflows" in p.parts:
-            rows.append({"file": str(p.relative_to(src)).replace("\\","/"), "ok": True, "status": "SKIPPED", "message": "GitHub workflows 폴더는 보안권한 문제 방지를 위해 자동 제외"})
-            continue
-        if p.name in [".env", "secrets.toml"] or p.suffix.lower() in [".pem", ".key"]: continue
-        rel = str(p.relative_to(src)).replace("\\","/")
-        target = f"{prefix.strip('/')}/{rel}" if prefix.strip("/") else rel
-        ok, status, data = gh_put(owner, repo, branch, target, p.read_bytes(), msg, token)
-        rows.append({"file": target, "ok": ok, "status": status, "message": data.get("message","") if isinstance(data, dict) else ""})
-        time.sleep(0.05)
-    return rows
+    for rc, g in scored.groupby("경주"):
+        g = g.sort_values("AI점수", ascending=False).head(6)
+        nums = g["마번"].astype(int).tolist()
+        names = g["말이름"].astype(str).tolist()
+        if len(nums) >= 2:
+            rows.append({"경주": rc, "유형": "복승 참고", "조합": f"{nums[0]} - {nums[1]}", "말": f"{names[0]} / {names[1]}", "신뢰": round(g["AI점수"].head(2).mean(), 1), "설명": "상위 2두 중심. 실제 배당/출전취소 확인 필수"})
+        if len(nums) >= 3:
+            rows.append({"경주": rc, "유형": "삼복승 참고", "조합": f"{nums[0]} - {nums[1]} - {nums[2]}", "말": f"{names[0]} / {names[1]} / {names[2]}", "신뢰": round(g["AI점수"].head(3).mean(), 1), "설명": "상위권 3두 묶음. 무리한 금액 금지"})
+        value = g.sort_values(["배당매력", "AI점수"], ascending=False).head(3)
+        if len(value) >= 2:
+            vnums = value["마번"].astype(int).tolist()
+            vnames = value["말이름"].astype(str).tolist()
+            rows.append({"경주": rc, "유형": "고배당 관찰", "조합": " - ".join(map(str, vnums[:3])), "말": " / ".join(vnames[:3]), "신뢰": round(value["AI점수"].head(3).mean(), 1), "설명": "배당 매력 후보. 위험도 높을 수 있음"})
+    return pd.DataFrame(rows).sort_values(["경주", "신뢰"], ascending=[True, False]).reset_index(drop=True)
 
-def workflow(app_url, api_urls):
-    return f"""name: MARU Auto Test
-on:
-  workflow_dispatch:
-  schedule:
-    - cron: '*/30 * * * *'
-jobs:
-  auto-test:
-    runs-on: ubuntu-latest
-    steps:
-      - run: |
-          python - <<'PY'
-          import requests, json
-          targets=[]
-          app={app_url!r}
-          if app: targets.append(("APP_URL", app))
-          for i,u in enumerate({api_urls!r},1): targets.append((f"API_{{i}}", u))
-          rows=[]
-          for label,url in targets:
-              try:
-                  r=requests.get(url, timeout=15); rows.append({{"label":label,"ok":r.ok,"status":r.status_code,"preview":r.text[:500]}})
-              except Exception as e:
-                  rows.append({{"label":label,"ok":False,"error":str(e)}})
-          print(json.dumps(rows,ensure_ascii=False,indent=2))
-          if any(not x.get("ok") for x in rows): raise SystemExit(1)
-          PY
-"""
 
-m = load()
-st.set_page_config(page_title="MARU V13 통합 자동화 AI", page_icon="🧠", layout="wide")
-st.markdown("<style>.block-container{max-width:1280px;padding-top:1rem}.stButton>button{height:3rem;font-weight:800}</style>", unsafe_allow_html=True)
-st.title("🧠 MARU V13 통합 자동화 AI")
-st.caption("코드생성 + 패치 + GitHub 허브 자동 업로드 → Streamlit Cloud 자동 재배포")
-st.info("핵심: 이제 ZIP 다운로드 후 사람이 다시 올리는 단계 없이, 승인 후 대상 GitHub 저장소까지 자동 반영합니다.")
+def save_history(reco: pd.DataFrame, scored: pd.DataFrame) -> None:
+    ensure_dir()
+    if reco.empty:
+        return
+    hist = reco.copy()
+    hist["저장시간KST"] = now_kst().strftime("%Y-%m-%d %H:%M:%S")
+    hist["상위AI점수"] = scored["AI점수"].max() if not scored.empty else np.nan
+    if os.path.exists(HISTORY_PATH):
+        old = pd.read_csv(HISTORY_PATH)
+        hist = pd.concat([old, hist], ignore_index=True)
+    hist.tail(2000).to_csv(HISTORY_PATH, index=False, encoding="utf-8-sig")
 
-tabs = st.tabs(["📋 기능", "🤖 코드생성", "📁 등록", "📡 테스트", "🧯 로그분석", "🖼️ 사진분석/명령", "✅ 패치", "🔍 검사", "📦 버전", "🚀 GitHub 자동반영", "☁️ 구글시트", "📚 기록"])
 
-with tabs[0]:
-    st.write(FEATURES)
-    st.warning("GitHub 자동반영은 GitHub 토큰이 필요합니다. 토큰은 공개 저장소에 절대 올리지 마세요.")
+def read_history() -> pd.DataFrame:
+    if os.path.exists(HISTORY_PATH):
+        try:
+            return pd.read_csv(HISTORY_PATH)
+        except Exception:
+            return pd.DataFrame()
+    return pd.DataFrame()
 
-with tabs[1]:
-    st.subheader("진화형 AI 코드 생성기 + 자동 허브 업로드")
-    st.caption("목표를 입력하면 Streamlit 앱을 생성하고, 검사 후 GitHub 허브 저장소로 자동 업로드할 수 있습니다.")
-    gen_name = st.text_input("생성 프로젝트 이름", placeholder="maru-new-app")
-    gen_kind = st.selectbox("앱 종류", ["기본앱", "경마 분석앱 뼈대", "토토/스포츠 분석앱 뼈대", "API 대시보드", "기록/허브앱"])
-    gen_goal = st.text_area("앱 목표 / 필요한 기능", height=150, placeholder="예: 경마 API를 점검하고 오류 로그를 저장하는 모바일용 대시보드")
-    gen_repo = st.text_input("생성 결과를 올릴 GitHub repo 이름", placeholder="maru-new-app")
-    if st.button("코드 생성 + 자동검사", type="primary", use_container_width=True):
-        pname = infer_project_name(gen_name, "", None)
-        src = generate_streamlit_project(pname, gen_goal, gen_kind)
-        info = register_generated_project(m, pname, src, github_repo=(gen_repo.strip() or pname))
-        st.success(f"생성/검사 완료: {pname}")
-        st.json(info["scan"])
-        st.json(info["analysis"])
-        st.download_button("생성 앱 ZIP 다운로드", zip_bytes(src), f"{sname(pname)}_GENERATED.zip", "application/zip", use_container_width=True)
 
-    st.divider()
-    st.subheader("생성 앱 바로 GitHub 허브 업로드")
-    ps_gen = list(m.get("projects", {}).keys())
-    if not ps_gen:
-        st.info("먼저 위에서 코드를 생성하세요.")
-    else:
-        hub_project = st.selectbox("업로드할 생성/등록 프로젝트", ps_gen, key="hub_codegen_project")
-        gh = m["projects"][hub_project].get("github", {})
-        c1, c2 = st.columns(2)
-        with c1:
-            hub_owner = st.text_input("허브 GitHub owner", value=gh.get("owner", "skytins3-png"), key="hub_owner_codegen")
-            hub_repo = st.text_input("허브 대상 repo", value=gh.get("repo", hub_project), key="hub_repo_codegen")
-            hub_branch = st.text_input("branch", value=gh.get("branch", "main"), key="hub_branch_codegen")
-        with c2:
-            hub_token = st.text_input("GitHub 토큰", type="password", key="hub_token_codegen")
-            hub_msg = st.text_input("커밋 메시지", value=f"MARU generated code hub upload {datetime.now().strftime('%Y-%m-%d %H:%M')}", key="hub_msg_codegen")
-            st.warning("토큰은 저장하지 않습니다. 채팅창/README/GitHub 파일에 붙이지 마세요.")
-        if st.button("생성 앱 GitHub 허브에 자동 업로드/커밋", type="primary", use_container_width=True):
-            if not hub_token:
-                st.error("GitHub 토큰 필요")
-            else:
-                src = Path(m["projects"][hub_project]["src"])
-                rows = gh_upload_folder(src, hub_owner, hub_repo, hub_branch, hub_token, hub_msg, "")
-                ok = sum(1 for r in rows if r["ok"])
-                fail = len(rows) - ok
-                rec = {
-                    "time": datetime.now().isoformat(timespec="seconds"),
-                    "project": hub_project,
-                    "repo": f"{hub_owner}/{hub_repo}",
-                    "branch": hub_branch,
-                    "ok": ok,
-                    "fail": fail,
-                    "rows": rows,
-                    "type": "codegen_hub_upload"
-                }
-                m.setdefault("hub_uploads", []).append(rec)
-                m.setdefault("github_deploys", []).append(rec)
-                save_event(m, "hub_uploads", {"type":"codegen_hub_upload","project":hub_project,"status":"SUCCESS" if fail==0 else "PARTIAL","summary":f"성공 {ok}, 실패 {fail}"})
-                m["projects"][hub_project]["github"] = {"owner": hub_owner, "repo": hub_repo, "branch": hub_branch, "prefix": ""}
-                save(m)
-                if fail == 0:
-                    st.success("생성 앱 GitHub 허브 자동 업로드 완료")
-                else:
-                    st.warning(f"일부 제외/실패: 성공 {ok}, 실패 {fail}")
-                st.json(rows[:100])
+def demo_data() -> pd.DataFrame:
+    names = ["마루번개", "청풍질주", "백두스타", "계양돌풍", "한강불꽃", "스카이킹", "동해바람", "황금질주", "태양마루", "블루레이서"]
+    jockeys = ["김기수", "이기수", "박기수", "최기수", "정기수", "오기수", "강기수", "윤기수", "한기수", "서기수"]
+    rows = []
+    for rc in [1, 2, 3]:
+        for i in range(1, 11):
+            rows.append({
+                "경주": rc,
+                "마번": i,
+                "말이름": names[i - 1],
+                "기수": jockeys[i - 1],
+                "조교사": "미리보기",
+                "나이": 3 + (i % 5),
+                "부담중량": 52 + (i % 7),
+                "경주시간": f"{11 + rc}:{(i * 3) % 60:02d}",
+                "거리": 1000 + rc * 200,
+                "배당": round(1.6 + i * 1.35 + rc * .7, 1),
+                "최근순위": (i % 7) + 1,
+            })
+    return pd.DataFrame(rows)
 
-with tabs[2]:
-    name = st.text_input("프로젝트 이름", placeholder="maru-kra-final-clean", key="maru_project_name")
-    app_url = st.text_input("배포 앱 주소", placeholder="https://maru-kra-final-clean.streamlit.app", key="maru_app_url")
-    api_key = st.text_input("API KEY/TOKEN 선택", type="password")
-    api_urls = st.text_area("API URL 목록 - 한 줄에 하나")
-    up = st.file_uploader("ZIP 또는 app.py", type=["zip","py"])
-    if st.button("저장 + 자동검사", type="primary", use_container_width=True):
-        pname = infer_project_name(name, app_url, up)
-        if not up and pname not in m["projects"]:
-            st.warning("처음 등록은 ZIP 또는 app.py 필요")
+
+def render_top(scored: pd.DataFrame, reco: pd.DataFrame, logs: pd.DataFrame):
+    st.markdown(f"""
+    <div class='hero'>
+      <h1>🏇 {APP_NAME}</h1>
+      <p>한국시간 {now_kst().strftime('%Y-%m-%d %H:%M:%S')} · 분석은 참고용, 구매는 반드시 본인 수동 확인</p>
+    </div>
+    """, unsafe_allow_html=True)
+    st.write("")
+    if reco.empty:
+        st.warning("아직 추천 조합이 없습니다. API 키/URL/경마장/날짜를 확인하거나 미리보기 데이터를 켜세요.")
+        return
+    top = reco.iloc[0]
+    c1, c2 = st.columns([1.5, 1])
+    with c1:
+        st.markdown("<div class='big-card'>", unsafe_allow_html=True)
+        st.markdown(f"<span class='badge'>오늘의 강력 추천</span><span class='badge'>{top['유형']}</span>", unsafe_allow_html=True)
+        st.markdown(f"<div class='sub'>제{top['경주']}경주 · 신뢰 {top['신뢰']}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='pick'>{top['조합']}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='sub'>{top['말']}</div>", unsafe_allow_html=True)
+        st.markdown(f"<p class='small-note'>근거: {top['설명']}</p>", unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
+    with c2:
+        ok = int((logs["상태"].astype(str).str.startswith("OK")).sum()) if not logs.empty else 0
+        total = len(logs) if not logs.empty else 0
+        st.metric("API 연결", f"{ok}/{total}")
+        if not scored.empty:
+            st.metric("최고 AI점수", f"{scored['AI점수'].max():.1f}")
+            st.metric("분석 출전마", f"{len(scored)}두")
+
+
+def main():
+    cfg = load_config()
+
+    with st.sidebar:
+        st.header("⚙️ 설정")
+        st.caption(f"저장 키: {mask_key(cfg.get('service_key',''))}")
+        service_key = st.text_input("공공데이터 API Key", value=cfg.get("service_key", ""), type="password", help="한 번 저장하면 모바일에서 재입력하지 않아도 됩니다.")
+        meet = st.selectbox("경마장", list(MEET_MAP.keys()), index=list(MEET_MAP.keys()).index(cfg.get("meet", "서울")) if cfg.get("meet", "서울") in MEET_MAP else 0)
+        risk_mode = st.selectbox("분석 성향", ["균형형", "안정형", "고배당형"], index=["균형형", "안정형", "고배당형"].index(cfg.get("risk_mode", "균형형")) if cfg.get("risk_mode", "균형형") in ["균형형", "안정형", "고배당형"] else 0)
+        refresh_sec = st.selectbox("자동 새로고침", [0, 30, 60, 120, 300], index=[0, 30, 60, 120, 300].index(cfg.get("refresh_sec", 0)) if cfg.get("refresh_sec", 0) in [0, 30, 60, 120, 300] else 0)
+        use_demo = st.checkbox("API 안 될 때 미리보기 데이터 사용", value=False)
+        if st.button("💾 설정 저장", use_container_width=True):
+            cfg["service_key"] = service_key.strip()
+            cfg["meet"] = meet
+            cfg["risk_mode"] = risk_mode
+            cfg["refresh_sec"] = refresh_sec
+            save_config(cfg)
+            st.success("저장 완료")
+            st.rerun()
+
+        st.divider()
+        st.subheader("API URL ON/OFF")
+        api_urls = cfg.get("api_urls", DEFAULT_API_URLS)
+        for i, api in enumerate(api_urls):
+            api["enabled"] = st.checkbox(api.get("name", f"API{i+1}"), value=api.get("enabled", True), key=f"api_on_{i}")
+        cfg["api_urls"] = api_urls
+        if st.button("🔌 API ON/OFF 저장", use_container_width=True):
+            save_config(cfg)
+            st.success("API 설정 저장 완료")
+
+    # 자동 새로고침: Streamlit 기본만 사용. 외부 패키지 없음.
+    if cfg.get("refresh_sec", 0):
+        st.caption(f"자동 새로고침: {cfg['refresh_sec']}초")
+        time.sleep(0.1)
+
+    run = st.button("🚀 자동 종합 분석하기", use_container_width=True, type="primary")
+    st.caption("자동 구매/자동 결제는 없습니다. 분석 결과 확인 후 본인이 직접 판단하세요.")
+
+    if "last_scored" not in st.session_state:
+        st.session_state.last_scored = pd.DataFrame()
+        st.session_state.last_reco = pd.DataFrame()
+        st.session_state.last_logs = pd.DataFrame()
+
+    if run or st.session_state.last_scored.empty:
+        if not cfg.get("service_key") and not service_key and not use_demo:
+            logs = pd.DataFrame([{"API": "설정", "상태": "API Key 필요", "건수": 0, "시간": now_kst().strftime("%H:%M:%S")}])
+            entries = pd.DataFrame()
         else:
-            old = m["projects"].get(pname, {})
-            src = unzip_upload(up, pname) if up else Path(old["src"])
-            app_path = find_app(src)
-            info = {
-                "name": pname, "src": str(src), "app_file": str(app_path) if app_path else "",
-                "app_url": app_url.strip() or old.get("app_url",""),
-                "api_key": api_key or old.get("api_key",""),
-                "api_urls": [x.strip() for x in api_urls.splitlines() if x.strip()] or old.get("api_urls", []),
-                "version": old.get("version", 0),
-                "github": old.get("github", {}),
-                "scan": scan(src), "syntax": syntax_all(src), "errors": inspect_error_files(src), "analysis": analyze_app(app_path)
-            }
-            m["projects"][pname] = info
-            m["file_checks"].append({"time": datetime.now().isoformat(timespec="seconds"), "project": pname, "scan": info["scan"]})
-            save_event(m, "projects", {"type":"project_register","project":pname,"status":"SAVED","summary":"프로젝트 등록/검사"})
-            save(m)
-            st.success(f"등록/검사 완료: {pname}")
-            st.json(info["scan"]); st.json(info["analysis"])
+            if service_key and service_key != cfg.get("service_key"):
+                cfg["service_key"] = service_key.strip()
+                cfg["meet"] = meet
+                cfg["risk_mode"] = risk_mode
+                cfg["refresh_sec"] = refresh_sec
+                save_config(cfg)
+            with st.spinner("공공데이터 API 수집 및 분석 중..."):
+                dfs, logs = fetch_all(cfg)
+                entries = normalize_entries(dfs)
+            if entries.empty and use_demo:
+                entries = demo_data()
+                logs = pd.concat([logs, pd.DataFrame([{"API": "미리보기", "상태": "DEMO", "건수": len(entries), "시간": now_kst().strftime("%H:%M:%S")}])], ignore_index=True)
 
-with tabs[7]:
-    ps = list(m["projects"].keys())
-    if not ps: st.info("등록 먼저")
-    else:
-        sel = st.selectbox("프로젝트", ps, key="scan")
-        info = m["projects"][sel]; src = Path(info["src"])
-        if st.button("다시 검사", type="primary", use_container_width=True):
-            app_path = find_app(src)
-            info.update({"scan": scan(src), "syntax": syntax_all(src), "errors": inspect_error_files(src), "analysis": analyze_app(app_path)})
-            save(m); st.success("검사 완료")
-        st.subheader("파일 목록"); st.json(info.get("scan", {}))
-        st.subheader("문법 검사"); st.json(info.get("syntax", []))
-        st.subheader("오류 파일"); st.json(info.get("errors", []))
-        st.subheader("기능 분석"); st.json(info.get("analysis", {}))
+        scored = score_entries(entries, risk_mode=cfg.get("risk_mode", "균형형"))
+        reco = make_recommendations(scored)
+        if not reco.empty:
+            save_history(reco, scored)
+        st.session_state.last_scored = scored
+        st.session_state.last_reco = reco
+        st.session_state.last_logs = logs
 
-with tabs[3]:
-    ps = list(m["projects"].keys())
-    if not ps: st.info("등록 먼저")
-    else:
-        sel = st.selectbox("프로젝트", ps, key="test")
-        cnt = st.number_input("반복 횟수", 1, 20, 1)
-        if st.button("자동/반복 테스트", type="primary", use_container_width=True):
-            info = m["projects"][sel]
-            results = []
-            for i in range(int(cnt)):
-                rows=[]
-                if info.get("app_url"): rows.append(test_url("APP_URL", info["app_url"]))
-                for j,u in enumerate(info.get("api_urls",[]),1): rows.append(test_url(f"API_{j}", u, info.get("api_key","")))
-                rec={"time":datetime.now().isoformat(timespec="seconds"),"project":sel,"round":i+1,"rows":rows,"analysis":analyze_tests(rows)}
-                results.append(rec); m["test_records"].append(rec); save_event(m, "test_records", {"type":"test","project":sel,"status":"DONE","summary":"자동/반복 테스트"}); info["last_test"]=rec
-            save(m); st.success("테스트 완료"); st.json(results)
-        info = m["projects"][sel]
-        st.download_button("PC 꺼져도 테스트용 maru_auto_test.yml", workflow(info.get("app_url",""), info.get("api_urls",[])).encode(), "maru_auto_test.yml", "text/yaml", use_container_width=True)
+    scored = st.session_state.last_scored
+    reco = st.session_state.last_reco
+    logs = st.session_state.last_logs
 
-with tabs[4]:
-    st.subheader("로그파일 / 오류 로그 분석")
-    st.caption("Streamlit Cloud 로그를 복사해 붙여넣거나 log/txt/json 파일을 업로드하면 오류 패턴을 분석하고 필요한 패치를 추천합니다.")
-    ps = list(m["projects"].keys())
-    if not ps:
-        st.info("먼저 프로젝트를 등록하세요.")
-    else:
-        sel = st.selectbox("로그 분석 대상 프로젝트", ps, key="log_project")
-        pasted_log = st.text_area("로그 붙여넣기", height=220, placeholder="Streamlit Cloud 로그, Traceback, HTTP 오류, NameError 등을 여기에 붙여넣으세요.")
-        log_file = st.file_uploader("로그파일 업로드", type=["txt", "log", "json", "csv"], key="manual_log_upload")
-        if st.button("로그 분석 + 패치 추천 저장", type="primary", use_container_width=True):
-            file_text = decode_uploaded_log(log_file)
-            combined = (pasted_log or "") + "\n\n" + (file_text or "")
-            if not combined.strip():
-                st.warning("붙여넣은 로그 또는 업로드한 로그파일이 필요합니다.")
-            else:
-                analysis = parse_log(combined)
-                rec = {
-                    "time": datetime.now().isoformat(timespec="seconds"),
-                    "project": sel,
-                    "summary": analysis,
-                    "recommended_patches": analysis.get("recommended_patches", []),
-                    "preview": combined[:3000],
-                }
-                m.setdefault("log_analyses", []).append(rec)
-                m["projects"][sel]["last_log_analysis"] = rec
-                save_event(m, "log_analyses", {
-                    "type": "log_analysis",
-                    "project": sel,
-                    "status": "DONE",
-                    "summary": "수동 로그 분석",
-                    "data": rec,
-                })
-                save(m)
-                st.success("로그 분석 완료. 추천 패치를 ✅ 패치 탭에서 승인할 수 있습니다.")
-                st.json(analysis)
-        last = m.get("projects", {}).get(sel, {}).get("last_log_analysis")
-        if last:
-            st.markdown("### 최근 로그 분석 결과")
-            st.json(last)
+    render_top(scored, reco, logs)
 
-with tabs[5]:
-    st.subheader("사진 첨부 분석 + 명령 입력")
-    st.caption("앱 화면 캡처/오류 사진을 올리고 명령을 입력하면 패치 추천으로 저장합니다.")
-    ps = list(m["projects"].keys())
-    if not ps:
-        st.info("먼저 프로젝트를 등록하세요.")
-    else:
-        sel = st.selectbox("사진 분석 대상 프로젝트", ps, key="image_command_project")
-        imgs = st.file_uploader(
-            "사진 첨부",
-            type=["png", "jpg", "jpeg", "webp"],
-            accept_multiple_files=True,
-            key="image_command_uploads",
-        )
-        cmd = st.text_area(
-            "명령 입력",
-            height=140,
-            placeholder="예: 이 화면에서 버튼이 너무 작아. 모바일에서 크게 보이게 패치 추천해줘. / 이 오류 화면 보고 원인 찾아줘.",
-            key="image_command_text",
-        )
-        st.info("사진은 근거 파일로 저장하고, 입력한 명령을 분석해서 패치 추천으로 연결합니다.")
-        if st.button("사진 저장 + 명령 분석 + 패치 추천 저장", type="primary", use_container_width=True):
-            if not imgs and not cmd.strip():
-                st.warning("사진 또는 명령 입력이 필요합니다.")
-            else:
-                saved = save_uploaded_images(sel, imgs)
-                analysis = analyze_image_command(cmd, saved)
-                rec = {
-                    "time": datetime.now().isoformat(timespec="seconds"),
-                    "project": sel,
-                    "summary": analysis,
-                    "recommended_patches": analysis.get("recommended_patches", []),
-                    "command": cmd,
-                    "images": saved,
-                }
-                m.setdefault("image_analyses", []).append(rec)
-                m.setdefault("command_records", []).append(rec)
-                m["projects"][sel]["last_image_analysis"] = rec
-                save_event(m, "image_analyses", {
-                    "type": "image_command_analysis",
-                    "project": sel,
-                    "status": "DONE",
-                    "summary": "사진 첨부/명령 분석",
-                    "data": rec,
-                })
-                save(m)
-                st.success("사진/명령 분석 완료. 추천 패치를 ✅ 패치 탭에서 승인할 수 있습니다.")
-                st.json(analysis)
-        last_img = m.get("projects", {}).get(sel, {}).get("last_image_analysis")
-        if last_img:
-            st.markdown("### 최근 사진/명령 분석 결과")
-            st.json(last_img)
+    st.write("")
+    tabs = st.tabs(["🔥 추천", "📊 출전마 점수", "🔌 API 상태", "🧾 저장 기록", "⚠️ 주의"])
 
-with tabs[6]:
-    ps = list(m["projects"].keys())
-    if not ps: st.info("등록 먼저")
-    else:
-        sel = st.selectbox("프로젝트", ps, key="patch")
-        info = m["projects"][sel]; src=Path(info["src"]); app_path=Path(info.get("app_file","")) if info.get("app_file") else find_app(src)
-        recset=set()
-        if info.get("last_test"): recset.update(info["last_test"]["analysis"].get("recommended_patches",[]))
-        if info.get("last_log_analysis"): recset.update(info["last_log_analysis"].get("recommended_patches", []))
-        if info.get("last_image_analysis"): recset.update(info["last_image_analysis"].get("recommended_patches", []))
-        for e in info.get("errors",[]): recset.update(e.get("analysis",{}).get("recommended_patches",[]))
-        st.json(analyze_app(app_path))
-        approved=[]
-        for k,v in PATCHES.items():
-            default = k in recset
-            if st.checkbox(v, value=default, key=f"{sel}_{k}"): approved.append(k)
-        st.error("자동구매/자동결제는 이 앱에서 지원하지 않고 차단합니다.")
-        if st.button("승인 항목 실제 패치 → 새 ZIP 생성", type="primary", use_container_width=True):
-            before=analyze_app(app_path)
-            apply_patch(app_path, approved)
-            add_helpers(src, approved)
-            ensure_req(src)
-            after=analyze_app(app_path)
-            syn=syntax_all(src)
-            ver=int(info.get("version",0))+1; info["version"]=ver; info["analysis"]=after
-            write(src/f"feature_snapshot_v{ver:03d}.json", json.dumps({"before":before,"after":after,"approved":approved}, ensure_ascii=False, indent=2))
-            zp=make_zip(src, sel, ver)
-            ok=all(x["ok"] for x in syn)
-            row={"time":datetime.now().isoformat(timespec="seconds"),"project":sel,"version":ver,"approved":approved,"syntax_ok":ok,"zip":str(zp)}
-            m["patch_records"].append(row); save_event(m, "patch_records", {"type":"patch","project":sel,"version":ver,"status":"SUCCESS" if ok else "CHECK","summary":"승인 패치"}); save(m)
-            st.success(f"패치 완료 v{ver:03d}" if ok else "패치됐지만 문법 오류 확인 필요")
-            st.json({"before":before,"after":after,"syntax":syn})
-            with open(zp,"rb") as f: st.download_button("패치 ZIP 다운로드", f, file_name=zp.name, mime="application/zip", use_container_width=True)
-
-with tabs[9]:
-    ps=list(m["projects"].keys())
-    if not ps: st.info("등록 먼저")
-    else:
-        sel=st.selectbox("프로젝트", ps, key="gh")
-        info=m["projects"][sel]; old=info.get("github",{})
-        c1,c2=st.columns(2)
-        with c1:
-            owner=st.text_input("GitHub owner", old.get("owner","skytins3-png"))
-            repo=st.text_input("대상 repo", old.get("repo","maru-kra-final-clean"))
-            branch=st.text_input("branch", old.get("branch","main"))
-            prefix=st.text_input("업로드 폴더 prefix", old.get("prefix",""), placeholder="비우면 루트")
-        with c2:
-            token=st.text_input("GitHub 토큰", type="password")
-            msg=st.text_input("커밋 메시지", f"MARU auto patch deploy {datetime.now().strftime('%Y-%m-%d %H:%M')}")
-            savecfg=st.checkbox("토큰 제외 설정 저장", value=True)
-            st.warning("토큰은 저장하지 않습니다. 매번 입력하거나 Streamlit Secrets를 쓰는 게 안전합니다.")
-            st.info(".github/workflows 폴더는 GitHub 보안권한 문제 방지를 위해 자동 업로드에서 제외합니다.")
-        if st.button("연결 확인", use_container_width=True):
-            if not token: st.error("토큰 필요")
-            else:
-                code,data=gh_repo(owner,repo,token)
-                st.success("연결 성공") if code==200 else st.error(f"실패 HTTP {code}")
-                st.json(data)
-        if st.button("대상 GitHub 저장소에 자동 업로드/커밋", type="primary", use_container_width=True):
-            if not token: st.error("토큰 필요")
-            else:
-                if savecfg:
-                    info["github"]={"owner":owner,"repo":repo,"branch":branch,"prefix":prefix}; save(m)
-                rows=gh_upload_folder(Path(info["src"]), owner, repo, branch, token, msg, prefix)
-                ok=sum(1 for r in rows if r["ok"]); fail=len(rows)-ok
-                deploy={"time":datetime.now().isoformat(timespec="seconds"),"project":sel,"repo":f"{owner}/{repo}","branch":branch,"ok":ok,"fail":fail,"rows":rows}
-                m["github_deploys"].append(deploy); save_event(m, "github_deploys", {"type":"github_deploy","project":sel,"status":"SUCCESS" if fail==0 else "PARTIAL","summary":f"성공 {ok}, 실패 {fail}"}); save(m)
-                st.success("GitHub 자동반영 완료. Streamlit Cloud가 곧 재배포합니다." if fail==0 else f"일부 실패: 성공 {ok}, 실패 {fail}")
-                st.json(rows[:100])
-
-with tabs[8]:
-    ps=list(m["projects"].keys())
-    if not ps: st.info("등록 먼저")
-    else:
-        sel=st.selectbox("프로젝트", ps, key="ver")
-        info=m["projects"][sel]; src=Path(info["src"])
-        st.metric("현재 버전", info.get("version",0))
-        st.download_button("현재 보관본 ZIP", zip_bytes(src), f"{sname(sel)}_CURRENT.zip", "application/zip", use_container_width=True)
-        app_path=Path(info.get("app_file","")) if info.get("app_file") else find_app(src)
-        if app_path and app_path.exists():
-            st.download_button("단일 app.py", read(app_path).encode(), f"{sname(sel)}_app.py", "text/x-python", use_container_width=True)
-
-
-with tabs[10]:
-    st.subheader("구글시트 허브 저장")
-    st.caption("프로젝트, 테스트, 패치, GitHub 자동반영, 코드생성 허브 업로드 기록을 Google Sheets에 저장합니다.")
-    cfg = get_gsheet_config(m)
-    enabled = st.checkbox("구글시트 저장 사용", value=bool(cfg.get("enabled")))
-    sheet_id = st.text_input("Google Sheet ID", value=cfg.get("sheet_id", ""))
-    service_json = st.text_area("서비스계정 JSON", value=cfg.get("service_account_json", ""), height=180)
-    st.info("서비스계정 JSON 안의 client_email을 Google Sheet 편집자로 공유해야 연결됩니다.")
-    if st.button("구글시트 설정 저장", type="primary", use_container_width=True):
-        cfg.update({"enabled": enabled, "sheet_id": sheet_id.strip(), "service_account_json": service_json.strip()})
-        m["google_sheets"] = cfg
-        save(m)
-        st.success("구글시트 설정 저장 완료")
-    if st.button("연결 테스트", use_container_width=True):
-        cfg.update({"enabled": enabled, "sheet_id": sheet_id.strip(), "service_account_json": service_json.strip()})
-        m["google_sheets"] = cfg
-        ok, msg = gsheet_append(m, "connection_test", {
-            "type": "connection_test",
-            "project": "MARU",
-            "status": "TEST",
-            "summary": "구글시트 연결 테스트",
-        })
-        save(m)
-        if ok:
-            st.success(msg)
+    with tabs[0]:
+        if reco.empty:
+            st.info("추천 데이터가 없습니다.")
         else:
-            st.error(msg)
-    st.markdown("### 저장되는 탭")
-    st.write(["connection_test", "projects", "test_records", "patch_records", "github_deploys", "hub_uploads", "log_analyses", "image_analyses", "generated_projects", "lessons"])
+            st.dataframe(reco, use_container_width=True, hide_index=True)
+            c1, c2 = st.columns(2)
+            with c1:
+                st.link_button("KRA 공식 페이지 열기", KRA_MAIN_URL, use_container_width=True)
+            with c2:
+                st.link_button("수동 구매 페이지로 이동", KRA_BETTING_URL, use_container_width=True)
+            st.warning("구매 전 출전취소, 배당 변경, 경주시간, 본인 한도를 반드시 다시 확인하세요.")
 
-with tabs[11]:
-    st.subheader("GitHub 자동반영 기록"); st.json(m.get("github_deploys", [])[-20:])
-    st.subheader("코드생성 허브 업로드 기록"); st.json(m.get("hub_uploads", [])[-20:])
-    st.subheader("패치 기록"); st.json(m.get("patch_records", [])[-20:])
-    st.subheader("테스트 기록"); st.json(m.get("test_records", [])[-20:])
-    st.subheader("로그 분석 기록"); st.json(m.get("log_analyses", [])[-20:])
-    st.subheader("사진/명령 분석 기록"); st.json(m.get("image_analyses", [])[-20:])
-    st.subheader("학습"); st.json(m.get("lessons", [])[-50:])
+    with tabs[1]:
+        if scored.empty:
+            st.info("출전마 점수 데이터가 없습니다.")
+        else:
+            show_cols = [c for c in ["경주", "경주시간", "마번", "말이름", "기수", "나이", "부담중량", "거리", "배당", "최근순위", "AI점수", "안정성", "배당매력", "위험도", "근거"] if c in scored.columns]
+            st.dataframe(scored[show_cols], use_container_width=True, hide_index=True)
+            st.download_button("CSV 다운로드", scored[show_cols].to_csv(index=False, encoding="utf-8-sig"), file_name=f"maru_kra_score_{today_str()}.csv", mime="text/csv", use_container_width=True)
+
+    with tabs[2]:
+        st.dataframe(logs, use_container_width=True, hide_index=True)
+        st.caption("HTTP 500이 나오면 보통 API 엔드포인트/서비스명/인증키 인코딩/승인 상태/조회 조건 문제입니다. 해당 API만 OFF로 두고 나머지 분석은 계속 가능합니다.")
+
+    with tabs[3]:
+        hist = read_history()
+        if hist.empty:
+            st.info("저장 기록이 아직 없습니다.")
+        else:
+            st.dataframe(hist.tail(200).sort_index(ascending=False), use_container_width=True, hide_index=True)
+            st.download_button("저장기록 CSV 다운로드", hist.to_csv(index=False, encoding="utf-8-sig"), file_name="maru_kra_history.csv", mime="text/csv", use_container_width=True)
+
+    with tabs[4]:
+        st.markdown("""
+        ### 안전 사용 원칙
+        - 이 앱은 **분석 참고용**입니다. 적중률이나 수익을 보장하지 않습니다.
+        - **자동 마권 구매, 자동 결제, 몰래 구매 실행 기능은 없습니다.**
+        - 배당률과 출전 정보는 실시간으로 바뀔 수 있으니 최종 구매 전 KRA 공식 화면에서 다시 확인하세요.
+        - 잃어도 생활에 영향 없는 금액 안에서만 판단하세요.
+        """)
+
+    if cfg.get("refresh_sec", 0):
+        # Streamlit 1.58 기준: st.rerun 사용 가능. 너무 잦은 새로고침 방지.
+        time.sleep(int(cfg.get("refresh_sec", 0)))
+        st.rerun()
+
+
+if __name__ == "__main__":
+    main()
+
+
+# ===== MARU V13 PATCH ADDONS =====
+with st.expander('🐎 경마 추천 없음 보정 안내'):
+    st.info('추천 파일이 비어 있어도 공식 경주 일정이 있으면 경주 있음 / 추천 생성 대기 / 수집 필요로 표시되도록 보정 파일을 추가했습니다.')
+
+
+# ===== MARU V13 PATCH ADDONS =====
+with st.expander('🐎 경마 추천 없음 보정 안내'):
+    st.info('추천 파일이 비어 있어도 공식 경주 일정이 있으면 경주 있음 / 추천 생성 대기 / 수집 필요로 표시되도록 보정 파일을 추가했습니다.')
+
+
+# ===== MARU V13 PATCH ADDONS =====
+with st.expander('🐎 경마 추천 없음 보정 안내'):
+    st.info('추천 파일이 비어 있어도 공식 경주 일정이 있으면 경주 있음 / 추천 생성 대기 / 수집 필요로 표시되도록 보정 파일을 추가했습니다.')
+
+
+# ===== MARU V13 PATCH ADDONS =====
+with st.expander('🐎 경마 추천 없음 보정 안내'):
+    st.info('추천 파일이 비어 있어도 공식 경주 일정이 있으면 경주 있음 / 추천 생성 대기 / 수집 필요로 표시되도록 보정 파일을 추가했습니다.')
