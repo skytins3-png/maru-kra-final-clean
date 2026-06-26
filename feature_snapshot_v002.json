@@ -1,0 +1,35 @@
+{
+  "before": {
+    "features": [
+      "Streamlit UI",
+      "API 호출",
+      "timeout 설정",
+      "오류 처리",
+      "다운로드/ZIP",
+      "경마 관련",
+      "토토/스포츠 관련"
+    ],
+    "risks": [
+      "큰 위험 없음"
+    ],
+    "lines": 592
+  },
+  "after": {
+    "features": [
+      "Streamlit UI",
+      "API 호출",
+      "timeout 설정",
+      "오류 처리",
+      "다운로드/ZIP",
+      "경마 관련",
+      "토토/스포츠 관련"
+    ],
+    "risks": [
+      "큰 위험 없음"
+    ],
+    "lines": 597
+  },
+  "approved": [
+    "race_schedule_fallback"
+  ]
+}
