@@ -1,24 +1,21 @@
-# MARU V13 통합 자동화 AI
+# MARU KRA Mobile Final App
 
-오늘 대화 기준 통합본입니다. 기존 기능을 제거하지 않고 V12.3까지의 기능에 HTML 카드 코드노출 수정, 경마시간 추천없음 표시 보정 패치를 추가했습니다.
+경마 공공데이터 API를 불러와 모바일용 대시보드에서 출전마 점수와 추천 조합을 보여주는 Streamlit 앱입니다.
 
-## 포함
-- 경마앱/토토앱 ZIP 등록
-- AI 코드생성기
-- 로그 붙여넣기/로그파일 분석
-- 사진 첨부/명령 입력
-- 구글시트 저장
-- 승인 패치
-- GitHub 자동반영
-- 모바일 사용
-- HTML agent-card 코드노출 수정 패치
-- 경마시간인데 추천 없음 표시 보정 패치
-- 자동구매/자동결제 차단
+## 실행 방법
 
-## 올릴 파일
-app.py
-requirements.txt
-README.md
-ai_memory.json
+```bash
+pip install -r requirements.txt
+streamlit run app.py
+```
 
-Streamlit Cloud Main file path: app.py
+## 구성
+
+- `app.py`: 통합 앱 파일
+- `requirements.txt`: 필요한 패키지
+- `.maru_kra/config.json`: 앱 실행 후 자동 생성되는 설정 저장 파일
+- `.maru_kra/history.csv`: 추천 기록 저장 파일
+
+## 주의
+
+이 앱은 분석 참고용입니다. 자동 마권 구매, 자동 결제 기능은 포함하지 않습니다.
