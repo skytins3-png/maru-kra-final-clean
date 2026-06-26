@@ -1,5 +1,5 @@
 {
-  "version": "13.0-all-in-one-final",
+  "version": "15.1-width-warning-fix",
   "projects": {},
   "patch_records": [],
   "github_deploys": [],
@@ -15,5 +15,20 @@
     "sheet_id": "",
     "service_account_json": ""
   },
-  "lessons": []
+  "lessons": [],
+  "default_profile": {
+    "project_name": "maru-kra-final-clean",
+    "app_url": "https://maru-kra-final-clean.streamlit.app",
+    "api_key": "",
+    "api_urls": "",
+    "github_owner": "skytins3-png",
+    "github_repo": "maru-kra-final-clean",
+    "github_branch": "main"
+  },
+  "saved_profiles": {},
+  "project_vault": {},
+  "continuous_loop_history": [],
+  "improvement_requests": [],
+  "approved_patch_queue": [],
+  "updated_at": "2026-06-26T20:42:45"
 }
