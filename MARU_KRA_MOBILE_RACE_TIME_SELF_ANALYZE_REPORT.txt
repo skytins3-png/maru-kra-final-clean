@@ -1,0 +1,16 @@
+MARU KRA 모바일 경주시간 자체분석 패치 리포트
+생성시각: 2026-06-26 01:51:45
+
+OK - app.py 문법검사
+OK - AST 파싱 검사
+OK - 모바일 경주시간 자체 분석 helper 추가
+OK - 모바일 빈 추천 시 즉시 분석 적용
+OK - fetch_all_live 모바일 호출
+OK - score_and_recommend 모바일 호출
+OK - save_mobile_recommend_json 저장
+OK - three_type_recommend 허브 저장
+OK - 자동구매/자동결제 없음
+OK - 모바일 3분류 간소화 유지
+OK - PC/모바일 캐릭터 유지
+OK - 월화수목 허브 운영 유지
+OK - 자가학습 운영센터 유지
