@@ -5803,3 +5803,13 @@ def render() -> None:
 
 if __name__ == "__main__":
     render()
+
+
+# ===== MARU V13 PATCH ADDONS =====
+with st.expander('🐎 경마 추천 없음 보정 안내'):
+    st.info('추천 파일이 비어 있어도 공식 경주 일정이 있으면 경주 있음 / 추천 생성 대기 / 수집 필요로 표시되도록 보정 파일을 추가했습니다.')
+
+
+# ===== MARU V13 PATCH ADDONS =====
+with st.expander('🐎 경마 추천 없음 보정 안내'):
+    st.info('추천 파일이 비어 있어도 공식 경주 일정이 있으면 경주 있음 / 추천 생성 대기 / 수집 필요로 표시되도록 보정 파일을 추가했습니다.')
