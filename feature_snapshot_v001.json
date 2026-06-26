@@ -10,9 +10,9 @@
       "토토/스포츠 관련"
     ],
     "risks": [
-      "자동구매/자동결제 문구 있음 - 차단 권장"
+      "큰 위험 없음"
     ],
-    "lines": 5682
+    "lines": 630
   },
   "after": {
     "features": [
@@ -25,9 +25,14 @@
       "토토/스포츠 관련"
     ],
     "risks": [
-      "자동구매/자동결제 문구 있음 - 차단 권장"
+      "큰 위험 없음"
     ],
-    "lines": 5682
+    "lines": 639
   },
-  "approved": []
+  "approved": [
+    "error_logger",
+    "api_timeout",
+    "kra_helper",
+    "race_schedule_fallback"
+  ]
 }
