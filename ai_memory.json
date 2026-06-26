@@ -1,0 +1,19 @@
+{
+  "version": "13.0-all-in-one-final",
+  "projects": {},
+  "patch_records": [],
+  "github_deploys": [],
+  "test_records": [],
+  "file_checks": [],
+  "generated_projects": [],
+  "hub_uploads": [],
+  "log_analyses": [],
+  "image_analyses": [],
+  "command_records": [],
+  "google_sheets": {
+    "enabled": false,
+    "sheet_id": "",
+    "service_account_json": ""
+  },
+  "lessons": []
+}
