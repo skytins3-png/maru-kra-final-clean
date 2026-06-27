@@ -4069,6 +4069,312 @@ def render_mobile_character_strip() -> None:
 
 
 
+
+
+# API_RECEIVED_FILE_VIEWER_FIX
+def _api_received_dir() -> Path:
+    d = DATA_DIR / "api_received_files" if "DATA_DIR" in globals() else Path("maru_kra_data") / "api_received_files"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+def _safe_filename_part(x: Any) -> str:
+    s = str(x or "").strip()
+    s = re.sub(r"[^0-9A-Za-z가-힣_\-]+", "_", s)
+    return s[:60] or "unknown"
+
+def save_api_received_files(data=None, status_df=None, rc_date: str = "", meet: str = "", race_no: Any = "") -> Dict[str, Any]:
+    data = data or st.session_state.get("live_data", {}) or {}
+    status_df = status_df if status_df is not None else st.session_state.get("api_status", pd.DataFrame())
+    if not rc_date:
+        try:
+            rc_date = today_kst() if "today_kst" in globals() else now_kst().strftime("%Y%m%d")
+        except Exception:
+            rc_date = ""
+    if not meet:
+        meet = "서울"
+    if not race_no:
+        try:
+            latest = load_mobile_recommend_json() if "load_mobile_recommend_json" in globals() else {}
+            race_no = latest.get("경주번호", "")
+        except Exception:
+            race_no = ""
+
+    out_dir = _api_received_dir()
+    saved_rows = []
+    label_map = dict(API_LABELS) if "API_LABELS" in globals() else {}
+
+    try:
+        if isinstance(status_df, pd.DataFrame) and not status_df.empty:
+            status_file = out_dir / f"{_safe_filename_part(rc_date)}_{_safe_filename_part(meet)}_{_safe_filename_part(race_no)}_API_STATUS.csv"
+            status_df.to_csv(status_file, index=False, encoding="utf-8-sig")
+            saved_rows.append({"구분": "상태표", "API": "API_STATUS", "파일명": status_file.name, "행수": len(status_df), "컬럼수": len(status_df.columns), "경로": str(status_file), "저장시각": now_str() if "now_str" in globals() else str(datetime.datetime.now())})
+    except Exception:
+        pass
+
+    try:
+        for key, df in (data.items() if isinstance(data, dict) else []):
+            if df is None:
+                continue
+            try:
+                if not isinstance(df, pd.DataFrame):
+                    df = pd.DataFrame(df)
+            except Exception:
+                continue
+            label = label_map.get(key, key)
+            file_path = out_dir / f"{_safe_filename_part(rc_date)}_{_safe_filename_part(meet)}_{_safe_filename_part(race_no)}_{_safe_filename_part(key)}_{_safe_filename_part(label)}.csv"
+            try:
+                df.to_csv(file_path, index=False, encoding="utf-8-sig")
+                saved_rows.append({"구분": "API데이터", "API": label, "key": key, "파일명": file_path.name, "행수": len(df), "컬럼수": len(df.columns), "경로": str(file_path), "저장시각": now_str() if "now_str" in globals() else str(datetime.datetime.now())})
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    try:
+        sched = _load_schedule_for_sidebar(rc_date, meet) if "_load_schedule_for_sidebar" in globals() else pd.DataFrame()
+        if isinstance(sched, pd.DataFrame) and not sched.empty:
+            sched_file = out_dir / f"{_safe_filename_part(rc_date)}_{_safe_filename_part(meet)}_RACE_SCHEDULE.csv"
+            sched.to_csv(sched_file, index=False, encoding="utf-8-sig")
+            saved_rows.append({"구분": "경주일정", "API": "RACE_SCHEDULE", "파일명": sched_file.name, "행수": len(sched), "컬럼수": len(sched.columns), "경로": str(sched_file), "저장시각": now_str() if "now_str" in globals() else str(datetime.datetime.now())})
+    except Exception:
+        pass
+
+    manifest = {"저장시각": now_str() if "now_str" in globals() else str(datetime.datetime.now()), "날짜": rc_date, "경마장": meet, "경주번호": race_no, "파일수": len(saved_rows), "파일목록": saved_rows}
+    try:
+        (_api_received_dir() / "api_received_manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+    try:
+        if "external_hub_save" in globals():
+            external_hub_save("api_received_files", manifest)
+    except Exception:
+        pass
+    return manifest
+
+def load_api_received_manifest() -> Dict[str, Any]:
+    try:
+        p = _api_received_dir() / "api_received_manifest.json"
+        if p.exists():
+            return json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return {"파일수": 0, "파일목록": []}
+
+def _read_api_received_csv(path_text: str, max_rows: int = 80) -> pd.DataFrame:
+    try:
+        p = Path(path_text)
+        if p.exists() and p.is_file():
+            return pd.read_csv(p, nrows=max_rows)
+    except Exception:
+        pass
+    return pd.DataFrame()
+
+def _render_one_api_file_item(item: Dict[str, Any], idx: int) -> None:
+    title = f"{item.get('구분','파일')} · {item.get('API','')} · {item.get('행수',0)}건"
+    with st.expander(title, expanded=False):
+        st.caption(item.get("파일명", ""))
+        df = _read_api_received_csv(item.get("경로", ""), max_rows=80)
+        if not df.empty:
+            st.dataframe(df, use_container_width=True, hide_index=True)
+        else:
+            st.info("미리보기 할 행이 없거나 파일을 읽지 못했습니다.")
+        try:
+            p = Path(item.get("경로", ""))
+            if p.exists() and p.is_file():
+                st.download_button("CSV 다운로드", data=p.read_bytes(), file_name=p.name, mime="text/csv", key=f"api_file_download_{idx}_{p.name}", width="stretch")
+        except Exception:
+            pass
+
+def render_api_received_file_viewer(data=None, status_df=None, rc_date: str = "", meet: str = "", race_no: Any = "", compact: bool = False) -> None:
+    st.markdown("### 📂 받은 API 파일 열어보기")
+    b1, b2 = st.columns([1, 1])
+    with b1:
+        if st.button("📥 현재 수집자료 파일로 저장/갱신", key=f"api_file_save_now_{'m' if compact else 'p'}", width="stretch"):
+            manifest = save_api_received_files(data, status_df, rc_date, meet, race_no)
+            st.success(f"저장 완료: {manifest.get('파일수', 0)}개 파일")
+    with b2:
+        st.caption("경주일정/API 상태표/API별 수신자료 CSV 확인")
+
+    try:
+        manifest = save_api_received_files(data, status_df, rc_date, meet, race_no)
+    except Exception:
+        manifest = load_api_received_manifest()
+
+    files = manifest.get("파일목록", []) if isinstance(manifest, dict) else []
+    if not files:
+        st.warning("아직 저장된 API 수신 파일이 없습니다. 실시간 데이터 새로고침 후 다시 확인하세요.")
+        return
+
+    st.caption(f"최근 저장: {manifest.get('저장시각','-')} · 파일 {len(files)}개")
+    summary_df = pd.DataFrame(files)
+    show_cols = [c for c in ["구분", "API", "파일명", "행수", "컬럼수", "저장시각"] if c in summary_df.columns]
+    if show_cols:
+        st.dataframe(summary_df[show_cols], use_container_width=True, hide_index=True)
+
+    limit = 10 if compact else len(files)
+    with st.expander("파일별 미리보기 / 다운로드", expanded=not compact):
+        for i, item in enumerate(files[:limit]):
+            _render_one_api_file_item(item, i)
+
+
+# API_SCHEDULE_VISIBILITY_CENTER_FIX
+def _safe_df_len(x) -> int:
+    try:
+        return int(len(x)) if x is not None else 0
+    except Exception:
+        return 0
+
+def _api_status_summary_dict(status_df=None, data=None) -> Dict[str, Any]:
+    """26개 API 접속/수집 여부를 PC·모바일에서 볼 수 있게 요약합니다."""
+    now_text = now_str() if "now_str" in globals() else str(datetime.datetime.now())
+    data = data or st.session_state.get("live_data", {}) or {}
+    if status_df is None:
+        status_df = st.session_state.get("api_status", pd.DataFrame())
+    total = len(API_LABELS) if "API_LABELS" in globals() else 0
+    rows = []
+    ok_count = 0
+    fail_count = 0
+    waiting_count = 0
+
+    label_map = dict(API_LABELS) if "API_LABELS" in globals() else {}
+    keys = [k for k, _ in API_LABELS] if "API_LABELS" in globals() else list(data.keys())
+
+    status_lookup = {}
+    try:
+        if status_df is not None and isinstance(status_df, pd.DataFrame) and not status_df.empty:
+            for _, r in status_df.iterrows():
+                key = str(r.get("key", "") or r.get("API", "") or "").strip()
+                if key:
+                    status_lookup[key] = dict(r)
+    except Exception:
+        pass
+
+    for key in keys:
+        label = label_map.get(key, key)
+        df_len = _safe_df_len(data.get(key))
+        st_row = status_lookup.get(key, {})
+        row_count = df_len
+        try:
+            if row_count <= 0 and "행수" in st_row:
+                row_count = int(float(str(st_row.get("행수", 0)).replace(",", "")))
+        except Exception:
+            pass
+        state = str(st_row.get("상태", "") or st_row.get("분류", "") or "").strip()
+        if row_count > 0 or state.upper() in ["OK", "CACHE", "SUCCESS", "성공"]:
+            icon = "✅"
+            ok_count += 1
+            state = state or "수집됨"
+        elif any(x in state for x in ["OFF", "선택 안 함", "대기", "시간전", "보류"]):
+            icon = "⏳"
+            waiting_count += 1
+            state = state or "대기"
+        else:
+            icon = "❌"
+            fail_count += 1
+            state = state or "미수집"
+        rows.append({
+            "상태": icon,
+            "API": label,
+            "key": key,
+            "행수": row_count,
+            "메시지": state,
+            "URL": str(st_row.get("URL", ""))[:120] if st_row else "",
+        })
+
+    schedule_rows = 0
+    schedule_note = "경주일정 미확인"
+    try:
+        rc_date = today_kst() if "today_kst" in globals() else (now_kst().strftime("%Y%m%d") if "now_kst" in globals() else "")
+        meet = "서울"
+        sched = _load_schedule_for_sidebar(rc_date, meet) if "_load_schedule_for_sidebar" in globals() else pd.DataFrame()
+        schedule_rows = _safe_df_len(sched)
+        schedule_note = f"경주일정 {schedule_rows}건 수신" if schedule_rows > 0 else "경주일정 0건 · API/허브 확인 필요"
+    except Exception as e:
+        schedule_note = f"경주일정 확인 실패: {str(e)[:80]}"
+
+    rec = {}
+    rec_note = "추천 저장 미확인"
+    try:
+        rec = load_mobile_recommend_json() if "load_mobile_recommend_json" in globals() else {}
+        if isinstance(rec, dict) and rec:
+            saved = rec.get("저장시각", "-")
+            meet = rec.get("경마장", "-")
+            rno = rec.get("경주번호", "-")
+            has_combo = _mobile_has_any_real_recommend(rec) if "_mobile_has_any_real_recommend" in globals() else bool(rec.get("삼쌍승18조합"))
+            rec_note = f"최근추천 {meet} {rno}R · 저장 {saved} · {'조합있음' if has_combo else '조합없음'}"
+        else:
+            rec_note = "최근추천 없음"
+    except Exception as e:
+        rec_note = f"추천 확인 실패: {str(e)[:80]}"
+
+    return {
+        "확인시각": now_text,
+        "총API": total,
+        "성공": ok_count,
+        "대기": waiting_count,
+        "실패": fail_count,
+        "경주일정건수": schedule_rows,
+        "경주일정상태": schedule_note,
+        "추천상태": rec_note,
+        "rows": rows,
+    }
+
+def _save_api_schedule_snapshot(status_df=None, data=None) -> Dict[str, Any]:
+    snap = _api_status_summary_dict(status_df, data)
+    try:
+        if "external_hub_save" in globals():
+            external_hub_save("api_schedule_status", snap)
+    except Exception:
+        pass
+    try:
+        p = DATA_DIR / "api_schedule_status.json" if "DATA_DIR" in globals() else Path("api_schedule_status.json")
+        p.write_text(json.dumps(snap, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+    return snap
+
+def render_api_schedule_visibility_center(status_df=None, data=None) -> None:
+    """PC에서 26개 API·경주일정·추천저장 상태를 한눈에 보여줍니다."""
+    snap = _save_api_schedule_snapshot(status_df, data)
+    st.markdown("### 🔎 26개 API · 경주일정 · 추천저장 확인센터")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("API 성공", f"{snap.get('성공',0)} / {snap.get('총API',0)}")
+    c2.metric("대기", snap.get("대기",0))
+    c3.metric("실패/미수집", snap.get("실패",0))
+    c4.metric("경주일정", f"{snap.get('경주일정건수',0)}건")
+    st.info(snap.get("경주일정상태", ""))
+    st.success(snap.get("추천상태", ""))
+
+    rows = snap.get("rows", [])
+    if rows:
+        df = pd.DataFrame(rows)
+        st.dataframe(df[["상태", "API", "행수", "메시지"]], use_container_width=True, hide_index=True)
+    else:
+        st.warning("API 목록을 찾지 못했습니다.")
+
+    with st.expander("상세 JSON / 허브 저장 확인", expanded=False):
+        st.json({k: v for k, v in snap.items() if k != "rows"})
+
+def render_mobile_api_schedule_status() -> None:
+    """모바일 하단에 간단한 API/일정/추천 상태 표시."""
+    try:
+        snap = _save_api_schedule_snapshot()
+        st.markdown("### 🔎 수집 상태")
+        st.caption(f"확인 {snap.get('확인시각','-')}")
+        a, b, c = st.columns(3)
+        a.metric("API 성공", f"{snap.get('성공',0)}/{snap.get('총API',0)}")
+        b.metric("일정", f"{snap.get('경주일정건수',0)}건")
+        c.metric("미수집", snap.get("실패",0))
+        st.info(snap.get("경주일정상태", ""))
+        st.success(snap.get("추천상태", ""))
+        with st.expander("26개 API 상세", expanded=False):
+            rows = snap.get("rows", [])
+            for r in rows:
+                st.caption(f"{r.get('상태')} {r.get('API')} · {r.get('행수')}건 · {r.get('메시지')}")
+    except Exception as e:
+        st.warning(f"수집 상태 표시 오류: {e}")
+
+
 # MOBILE_RACE_TIME_SELF_ANALYZE_FIX
 def _mobile_pick_live_context(latest: Dict[str, Any]) -> Dict[str, Any]:
     """모바일에서 추천이 비었을 때 현재 경주시간 기준으로 분석 대상 경주를 잡습니다."""
@@ -4287,10 +4593,14 @@ def render_mobile_quick_view() -> None:
         if not _mobile_has_any_real_recommend(latest):
             _render_mobile_end_or_wait_view(latest)
             render_mobile_character_strip()  # MOBILE_CHARACTER_STRIP_APPLY
+            render_mobile_api_schedule_status()  # MOBILE_API_STATUS_RENDER_APPLY
+            render_api_received_file_viewer(st.session_state.get("live_data", {}), st.session_state.get("api_status", pd.DataFrame()), compact=True)  # MOBILE_API_RECEIVED_FILE_VIEWER_APPLY
             return
 
     _render_mobile_compact_3type_view(latest)
     render_mobile_character_strip()  # MOBILE_CHARACTER_STRIP_APPLY
+    render_mobile_api_schedule_status()  # MOBILE_API_STATUS_RENDER_APPLY
+    render_api_received_file_viewer(st.session_state.get("live_data", {}), st.session_state.get("api_status", pd.DataFrame()), compact=True)  # MOBILE_API_RECEIVED_FILE_VIEWER_APPLY
     return
 
 
@@ -5379,6 +5689,8 @@ def render_live_panel(rc_date: str, meet: str, race_no: int, selected: List[str]
     render_pc_command_console(_cmd_current_row)  # PC_COMMAND_CONSOLE_RENDER_APPLY
     render_self_learning_control_center()  # SELF_LEARNING_CENTER_RENDER_APPLY
     render_weekly_agent_center()  # WEEKLY_AGENT_CENTER_RENDER_APPLY
+    render_api_schedule_visibility_center(st.session_state.get("api_status", pd.DataFrame()), st.session_state.get("live_data", {}))  # PC_API_STATUS_CENTER_RENDER_APPLY
+    render_api_received_file_viewer(st.session_state.get("live_data", {}), st.session_state.get("api_status", pd.DataFrame()), rc_date, meet, race_no, compact=False)  # PC_API_RECEIVED_FILE_VIEWER_APPLY
     should_auto_fetch = bool(auto_allowed)
     if run or run_sim or should_auto_fetch:
         with st.spinner(f"{meet} {int(race_no)}경주 실시간 API 수집 중... 최대 30~60초 걸릴 수 있습니다."):
