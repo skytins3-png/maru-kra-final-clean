@@ -1,3 +1,4 @@
+# ALL_MEET_EXCEL_VIEWER_FIX
 # -*- coding: utf-8 -*-
 """
 MARU KRA FINAL ALL-IN-ONE APP - STABLE BET INTEGRATED
@@ -4169,31 +4170,41 @@ def _read_api_received_csv(path_text: str, max_rows: int = 80) -> pd.DataFrame:
         pass
     return pd.DataFrame()
 
-def _render_one_api_file_item(item: Dict[str, Any], idx: int) -> None:
+def _render_one_api_file_item(item: Dict[str, Any], idx: int, allow_download: bool = False) -> None:
     title = f"{item.get('구분','파일')} · {item.get('API','')} · {item.get('행수',0)}건"
     with st.expander(title, expanded=False):
         st.caption(item.get("파일명", ""))
-        df = _read_api_received_csv(item.get("경로", ""), max_rows=80)
+        df = _read_api_received_csv(item.get("경로", ""), max_rows=500)
         if not df.empty:
-            st.dataframe(df, use_container_width=True, hide_index=True)
+            st.markdown("#### 엑셀 뷰어")
+            st.dataframe(
+                df,
+                use_container_width=True,
+                hide_index=True,
+                height=360,
+            )
+            st.caption(f"표시 행수: {len(df)}건 · 컬럼수: {len(df.columns)}개")
         else:
             st.info("미리보기 할 행이 없거나 파일을 읽지 못했습니다.")
-        try:
-            p = Path(item.get("경로", ""))
-            if p.exists() and p.is_file():
-                st.download_button("CSV 다운로드", data=p.read_bytes(), file_name=p.name, mime="text/csv", key=f"api_file_download_{idx}_{p.name}", width="stretch")
-        except Exception:
-            pass
+
+        if allow_download:
+            try:
+                p = Path(item.get("경로", ""))
+                if p.exists() and p.is_file():
+                    st.download_button("CSV 다운로드", data=p.read_bytes(), file_name=p.name, mime="text/csv", key=f"api_file_download_{idx}_{p.name}", width="stretch")
+            except Exception:
+                pass
+
 
 def render_api_received_file_viewer(data=None, status_df=None, rc_date: str = "", meet: str = "", race_no: Any = "", compact: bool = False) -> None:
-    st.markdown("### 📂 받은 API 파일 열어보기")
+    st.markdown("### 📊 경주일정 · API 수신자료 엑셀 뷰어")
     b1, b2 = st.columns([1, 1])
     with b1:
-        if st.button("📥 현재 수집자료 파일로 저장/갱신", key=f"api_file_save_now_{'m' if compact else 'p'}", width="stretch"):
+        if st.button("🔄 현재 수집자료 새로 열기", key=f"api_file_save_now_{'m' if compact else 'p'}", width="stretch"):
             manifest = save_api_received_files(data, status_df, rc_date, meet, race_no)
-            st.success(f"저장 완료: {manifest.get('파일수', 0)}개 파일")
+            st.success(f"갱신 완료: {manifest.get('파일수', 0)}개 자료")
     with b2:
-        st.caption("경주일정/API 상태표/API별 수신자료 CSV 확인")
+        st.caption("다운로드 없이 PC/모바일 화면에서 바로 표로 확인합니다.")
 
     try:
         manifest = save_api_received_files(data, status_df, rc_date, meet, race_no)
@@ -4202,19 +4213,47 @@ def render_api_received_file_viewer(data=None, status_df=None, rc_date: str = ""
 
     files = manifest.get("파일목록", []) if isinstance(manifest, dict) else []
     if not files:
-        st.warning("아직 저장된 API 수신 파일이 없습니다. 실시간 데이터 새로고침 후 다시 확인하세요.")
+        st.warning("아직 열어볼 API 수신자료가 없습니다. 실시간 데이터 새로고침 후 다시 확인하세요.")
         return
 
-    st.caption(f"최근 저장: {manifest.get('저장시각','-')} · 파일 {len(files)}개")
+    st.caption(f"최근 확인: {manifest.get('저장시각','-')} · 자료 {len(files)}개")
+
     summary_df = pd.DataFrame(files)
     show_cols = [c for c in ["구분", "API", "파일명", "행수", "컬럼수", "저장시각"] if c in summary_df.columns]
     if show_cols:
-        st.dataframe(summary_df[show_cols], use_container_width=True, hide_index=True)
+        st.dataframe(summary_df[show_cols], use_container_width=True, hide_index=True, height=220 if compact else 300)
 
-    limit = 10 if compact else len(files)
-    with st.expander("파일별 미리보기 / 다운로드", expanded=not compact):
-        for i, item in enumerate(files[:limit]):
-            _render_one_api_file_item(item, i)
+    schedule_files = [x for x in files if str(x.get("구분","")) == "경주일정"]
+    status_files = [x for x in files if str(x.get("구분","")) == "상태표"]
+    api_files = [x for x in files if str(x.get("구분","")) == "API데이터"]
+
+    tabs = st.tabs(["경주일정", "API 상태표", "API 수신자료"])
+    with tabs[0]:
+        if not schedule_files:
+            st.info("경주일정 자료가 없습니다.")
+        else:
+            # 전체 일정 우선 표시
+            schedule_files = sorted(schedule_files, key=lambda x: (0 if "ALL_RACE_SCHEDULE" in str(x.get("API","")) else 1, str(x.get("API",""))))
+            limit = len(schedule_files)
+            for i, item in enumerate(schedule_files[:limit]):
+                _render_one_api_file_item(item, 1000 + i, allow_download=False)
+
+    with tabs[1]:
+        if not status_files:
+            st.info("API 상태표 자료가 없습니다.")
+        else:
+            for i, item in enumerate(status_files[:5]):
+                _render_one_api_file_item(item, 2000 + i, allow_download=False)
+
+    with tabs[2]:
+        if not api_files:
+            st.info("API 수신자료가 없습니다.")
+        else:
+            if compact:
+                st.caption("모바일에서는 상위 10개 자료만 먼저 보여줍니다.")
+                api_files = api_files[:10]
+            for i, item in enumerate(api_files):
+                _render_one_api_file_item(item, 3000 + i, allow_download=False)
 
 
 # API_SCHEDULE_VISIBILITY_CENTER_FIX
@@ -4285,10 +4324,17 @@ def _api_status_summary_dict(status_df=None, data=None) -> Dict[str, Any]:
     schedule_note = "경주일정 미확인"
     try:
         rc_date = today_kst() if "today_kst" in globals() else (now_kst().strftime("%Y%m%d") if "now_kst" in globals() else "")
-        meet = "서울"
-        sched = _load_schedule_for_sidebar(rc_date, meet) if "_load_schedule_for_sidebar" in globals() else pd.DataFrame()
-        schedule_rows = _safe_df_len(sched)
-        schedule_note = f"경주일정 {schedule_rows}건 수신" if schedule_rows > 0 else "경주일정 0건 · API/허브 확인 필요"
+        meet_counts = {}
+        for m in ["서울", "부산경남", "제주"]:
+            try:
+                sched = _load_schedule_for_sidebar(rc_date, m) if "_load_schedule_for_sidebar" in globals() else pd.DataFrame()
+                cnt = _safe_df_len(sched)
+                meet_counts[m] = cnt
+                schedule_rows += cnt
+            except Exception:
+                meet_counts[m] = 0
+        schedule_note = " / ".join([f"{k} {v}건" for k, v in meet_counts.items()])
+        schedule_note = f"경주일정 수신: {schedule_note}" if schedule_rows > 0 else "경주일정 0건 · API/허브 확인 필요"
     except Exception as e:
         schedule_note = f"경주일정 확인 실패: {str(e)[:80]}"
 

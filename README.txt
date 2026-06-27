@@ -1,9 +1,10 @@
-MARU KRA API RECEIVED FILE VIEWER
+MARU KRA ALL MEET EXCEL VIEWER
 
-경주일정 및 26개 API 접속 후 받은 파일을 PC/모바일에서 열어보고 다운로드할 수 있게 하는 패치입니다.
-
-적용:
-ZIP 압축 풀기 → app.py만 GitHub 기존 app.py에 덮어쓰기 → Commit → Streamlit Reboot
+수정:
+- 경주일정 서울만 표시 문제 수정
+- 서울/부산경남/제주 전체 경주일정 확인
+- 다운로드가 아니라 PC/모바일에서 엑셀 뷰어처럼 바로 보기
+- API 상태표/API 수신자료도 탭으로 바로 보기
 
 모바일:
-https://maru-kra-final-clean.streamlit.app/?mode=mobile&v=fileviewer1
+https://maru-kra-final-clean.streamlit.app/?mode=mobile&v=excelviewer1
