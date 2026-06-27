@@ -1,10 +1,10 @@
-MARU KRA DIRECT ALL MEET SCHEDULE VIEWER
+MARU KRA EXCEL DETAIL EXPORT
 
 수정:
-- 서울만 보이던 문제 수정
-- 서울/부산경남/제주 경주일정을 API에 직접 요청
-- PC/모바일에서 다운로드 없이 바로 엑셀 뷰어로 표시
-- API 접속 로그를 바로 표시해서 왜 안 받았는지 확인
+- 경주일정 및 26개 API 수신자료를 실제 엑셀 .xlsx 파일로 생성
+- 시트: 요약 / 전체_경주일정 / 경주일정_접속로그 / API_상태표 / API별 수신자료
+- PC/모바일에서 엑셀 상세자료 열기 버튼 제공
+- requirements.txt에 xlsxwriter 포함
 
 모바일:
-https://maru-kra-final-clean.streamlit.app/?mode=mobile&v=directschedule1
+https://maru-kra-final-clean.streamlit.app/?mode=mobile&v=exceldata1

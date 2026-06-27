@@ -4073,6 +4073,296 @@ def render_mobile_character_strip() -> None:
 
 
 
+
+
+# EXCEL_DETAIL_WORKBOOK_EXPORT_FIX
+def _excel_safe_sheet_name(name: Any, used: Optional[set] = None) -> str:
+    used = used if used is not None else set()
+    s = str(name or "Sheet").strip()
+    s = re.sub(r"[\[\]\:\*\?\/\\]+", "_", s)
+    s = s[:31] or "Sheet"
+    base = s
+    i = 1
+    while s in used:
+        suffix = f"_{i}"
+        s = (base[:31-len(suffix)] + suffix)[:31]
+        i += 1
+    used.add(s)
+    return s
+
+def _excel_output_dir() -> Path:
+    d = DATA_DIR / "excel_exports" if "DATA_DIR" in globals() else Path("maru_kra_data") / "excel_exports"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+def _xlsx_write_one_sheet(writer, sheet_name: str, df: pd.DataFrame, title: str = "") -> None:
+    if df is None:
+        df = pd.DataFrame()
+    if not isinstance(df, pd.DataFrame):
+        try:
+            df = pd.DataFrame(df)
+        except Exception:
+            df = pd.DataFrame()
+    if df.empty:
+        df = pd.DataFrame([{"내용": "수신 자료 없음"}])
+    df.to_excel(writer, sheet_name=sheet_name, index=False, startrow=1)
+    workbook = writer.book
+    worksheet = writer.sheets[sheet_name]
+    title_fmt = workbook.add_format({"bold": True, "font_size": 14, "font_color": "#FFFFFF", "bg_color": "#111827", "align": "center"})
+    header_fmt = workbook.add_format({"bold": True, "font_color": "#FFFFFF", "bg_color": "#B45309", "border": 1, "align": "center"})
+    body_fmt = workbook.add_format({"border": 1, "valign": "top"})
+    worksheet.merge_range(0, 0, 0, max(0, min(len(df.columns)-1, 12)), title or sheet_name, title_fmt)
+    for col_idx, col_name in enumerate(df.columns):
+        worksheet.write(1, col_idx, col_name, header_fmt)
+        sample = [str(col_name)] + [str(x) for x in df[col_name].head(30).tolist()]
+        width = min(max([len(x) for x in sample] + [10]) + 2, 42)
+        worksheet.set_column(col_idx, col_idx, width, body_fmt)
+    worksheet.freeze_panes(2, 0)
+    try:
+        worksheet.autofilter(1, 0, max(1, len(df)+1), max(0, len(df.columns)-1))
+    except Exception:
+        pass
+
+def build_excel_detail_workbook(data=None, status_df=None, rc_date: str = "", meet: str = "", race_no: Any = "") -> Dict[str, Any]:
+    data = data or st.session_state.get("live_data", {}) or {}
+    status_df = status_df if status_df is not None else st.session_state.get("api_status", pd.DataFrame())
+    if not rc_date:
+        rc_date = today_kst() if "today_kst" in globals() else (now_kst().strftime("%Y%m%d") if "now_kst" in globals() else "")
+    if not meet:
+        meet = "서울"
+    if not race_no:
+        try:
+            race_no = _detect_current_race_for_no_click(rc_date, meet) if "_detect_current_race_for_no_click" in globals() else ""
+        except Exception:
+            race_no = ""
+
+    out_dir = _excel_output_dir()
+    file_name = f"MARU_KRA_DETAIL_{_safe_filename_part(rc_date) if '_safe_filename_part' in globals() else rc_date}_{_safe_filename_part(meet) if '_safe_filename_part' in globals() else meet}_{_safe_filename_part(race_no) if '_safe_filename_part' in globals() else race_no}.xlsx"
+    out_path = out_dir / file_name
+
+    schedule_df = pd.DataFrame()
+    schedule_log = pd.DataFrame()
+    try:
+        if "fetch_all_meet_schedule_direct" in globals():
+            schedule_df, schedule_log = fetch_all_meet_schedule_direct(rc_date)
+    except Exception as e:
+        schedule_log = pd.DataFrame([{"상태": f"전체 일정 직접수신 실패: {str(e)[:120]}"}])
+
+    try:
+        if "no_click_fetch_26api_snapshot" in globals():
+            data2, status2 = no_click_fetch_26api_snapshot(rc_date, meet, race_no)
+            if data2:
+                data = data2
+            if isinstance(status2, pd.DataFrame) and not status2.empty:
+                status_df = status2
+    except Exception:
+        pass
+
+    try:
+        import xlsxwriter  # noqa: F401
+    except Exception:
+        return {"성공": False, "메시지": "xlsxwriter가 설치되지 않았습니다. requirements.txt에 xlsxwriter를 추가해야 합니다.", "경로": ""}
+
+    try:
+        with pd.ExcelWriter(out_path, engine="xlsxwriter") as writer:
+            used = set()
+            summary_rows = [
+                {"항목": "생성시각", "값": now_str() if "now_str" in globals() else str(datetime.datetime.now())},
+                {"항목": "날짜", "값": rc_date},
+                {"항목": "기준 경마장", "값": meet},
+                {"항목": "기준 경주", "값": race_no},
+                {"항목": "경주일정 행수", "값": len(schedule_df) if isinstance(schedule_df, pd.DataFrame) else 0},
+                {"항목": "API 상태 행수", "값": len(status_df) if isinstance(status_df, pd.DataFrame) else 0},
+                {"항목": "API 자료 묶음수", "값": len(data) if isinstance(data, dict) else 0},
+                {"항목": "자동구매", "값": "없음"},
+                {"항목": "자동결제", "값": "없음"},
+            ]
+            _xlsx_write_one_sheet(writer, _excel_safe_sheet_name("요약", used), pd.DataFrame(summary_rows), "MARU KRA 엑셀 상세 요약")
+            _xlsx_write_one_sheet(writer, _excel_safe_sheet_name("전체_경주일정", used), schedule_df, "서울·부산경남·제주 전체 경주일정")
+            _xlsx_write_one_sheet(writer, _excel_safe_sheet_name("경주일정_접속로그", used), schedule_log, "경주일정 API 접속 로그")
+            _xlsx_write_one_sheet(writer, _excel_safe_sheet_name("API_상태표", used), status_df, "26개 API 접속 상태표")
+            label_map = dict(API_LABELS) if "API_LABELS" in globals() else {}
+            if isinstance(data, dict):
+                for key, df in data.items():
+                    try:
+                        label = label_map.get(key, key)
+                        _xlsx_write_one_sheet(writer, _excel_safe_sheet_name(f"API_{label}", used), df if isinstance(df, pd.DataFrame) else pd.DataFrame(df), f"{label} 수신자료")
+                    except Exception:
+                        continue
+        manifest = {"성공": True, "메시지": "엑셀 상세파일 생성 완료", "경로": str(out_path), "파일명": file_name, "생성시각": now_str() if "now_str" in globals() else str(datetime.datetime.now())}
+        try:
+            if "external_hub_save" in globals():
+                external_hub_save("excel_detail_exports", manifest)
+        except Exception:
+            pass
+        return manifest
+    except Exception as e:
+        return {"성공": False, "메시지": f"엑셀 생성 실패: {str(e)[:180]}", "경로": ""}
+
+def render_excel_detail_workbook_center(data=None, status_df=None, rc_date: str = "", meet: str = "", race_no: Any = "", compact: bool = False) -> None:
+    st.markdown("### 📘 엑셀 상세자료")
+    st.caption("경주일정·API상태·API수신자료를 시트별로 묶은 .xlsx 파일입니다.")
+    manifest = build_excel_detail_workbook(data, status_df, rc_date, meet, race_no)
+    if not manifest.get("성공"):
+        st.error(manifest.get("메시지", "엑셀 생성 실패"))
+        return
+    st.success(manifest.get("메시지", "엑셀 생성 완료"))
+    st.caption(f"파일명: {manifest.get('파일명','')}")
+    try:
+        p = Path(manifest.get("경로", ""))
+        if p.exists():
+            st.download_button(
+                "📘 엑셀 상세자료 열기",
+                data=p.read_bytes(),
+                file_name=p.name,
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key=f"excel_detail_download_{'m' if compact else 'p'}",
+                width="stretch",
+            )
+    except Exception as e:
+        st.warning(f"엑셀 파일 표시 실패: {e}")
+
+
+# NO_CLICK_AUTO_API_DIAGNOSTIC_FIX
+def _api_key_visible_status() -> Dict[str, Any]:
+    info = {"키있음": False, "키출처": "-", "마스터ON": True, "선택API수": 0, "전체API수": len(API_LABELS) if "API_LABELS" in globals() else 0}
+    try:
+        key = get_api_key() if "get_api_key" in globals() else ""
+        info["키있음"] = bool(str(key or "").strip())
+        info["키출처"] = get_api_key_source() if "get_api_key_source" in globals() else ("감지됨" if key else "없음")
+        info["키미리보기"] = masked_api_key() if "masked_api_key" in globals() else ("있음" if key else "없음")
+    except Exception as e:
+        info["키출처"] = f"확인실패: {str(e)[:60]}"
+    try:
+        info["마스터ON"] = bool(st.session_state.get("api_master_on", True))
+    except Exception:
+        pass
+    try:
+        switches = get_api_switches() if "get_api_switches" in globals() else {}
+        info["선택API수"] = sum(1 for k, _ in API_LABELS if switches.get(k, True)) if "API_LABELS" in globals() else 0
+    except Exception:
+        pass
+    return info
+
+def render_no_click_api_diagnostic() -> None:
+    st.markdown("### 🚦 API 연결 즉시진단")
+    info = _api_key_visible_status()
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("API Key", "있음" if info.get("키있음") else "없음")
+    c2.metric("키 출처", str(info.get("키출처","-"))[:18])
+    c3.metric("마스터", "ON" if info.get("마스터ON") else "OFF")
+    c4.metric("API 선택", f"{info.get('선택API수',0)}/{info.get('전체API수',0)}")
+    if not info.get("키있음"):
+        st.error("공공데이터 API Key가 감지되지 않았습니다. Streamlit Secrets에 KRA_API_KEY를 넣어야 26개 API가 붙습니다.")
+    elif not info.get("마스터ON"):
+        st.error("API 마스터 스위치가 OFF입니다. PC 사이드바에서 API 전체 ON으로 바꿔야 합니다.")
+    else:
+        st.success(f"API Key 감지됨 · {info.get('키미리보기','')}")
+
+def _auto_safe_selected_api_keys() -> List[str]:
+    if "API_LABELS" in globals():
+        return [k for k, _ in API_LABELS]
+    return ["race_url", "entry_url", "horse_url", "body_url", "gear_url", "rating_url", "odds_url", "today_odds_url"]
+
+def _detect_current_race_for_no_click(rc_date: str = "", meet: str = "서울") -> int:
+    try:
+        rc_date = rc_date or (today_kst() if "today_kst" in globals() else now_kst().strftime("%Y%m%d"))
+        sched = pd.DataFrame()
+        try:
+            sched, _log = fetch_all_meet_schedule_direct(rc_date) if "fetch_all_meet_schedule_direct" in globals() else (pd.DataFrame(), pd.DataFrame())
+        except Exception:
+            sched = pd.DataFrame()
+        if isinstance(sched, pd.DataFrame) and not sched.empty:
+            sdf = sched[sched["경마장"].astype(str).str.contains(str(meet), na=False)].copy() if "경마장" in sched.columns else sched.copy()
+            if not sdf.empty and "경주번호" in sdf.columns:
+                now = now_kst() if "now_kst" in globals() else datetime.datetime.now()
+                if "경주시각" in sdf.columns:
+                    sdf["_dt"] = pd.to_datetime(sdf["경주시각"], errors="coerce")
+                    future = sdf[sdf["_dt"].notna() & (sdf["_dt"] >= now - datetime.timedelta(minutes=20))]
+                    if not future.empty:
+                        return int(float(future.sort_values("_dt").iloc[0]["경주번호"]))
+                return int(float(sdf.sort_values("경주번호").iloc[0]["경주번호"]))
+    except Exception:
+        pass
+    return 1
+
+def no_click_fetch_26api_snapshot(rc_date: str = "", meet: str = "서울", race_no: Any = "") -> Tuple[Dict[str, pd.DataFrame], pd.DataFrame]:
+    rc_date = rc_date or (today_kst() if "today_kst" in globals() else (now_kst().strftime("%Y%m%d") if "now_kst" in globals() else ""))
+    meet = meet or "서울"
+    try:
+        race_no = int(float(race_no or _detect_current_race_for_no_click(rc_date, meet)))
+    except Exception:
+        race_no = 1
+
+    data = st.session_state.get("live_data", {}) or {}
+    status = st.session_state.get("api_status", pd.DataFrame())
+    try:
+        if isinstance(data, dict) and any((hasattr(v, "__len__") and len(v) > 0) for v in data.values()):
+            return data, status if isinstance(status, pd.DataFrame) else pd.DataFrame()
+    except Exception:
+        pass
+
+    try:
+        if "get_api_key" in globals() and not get_api_key():
+            return {}, pd.DataFrame([{"API": "전체", "key": "ALL", "행수": 0, "상태": "API_KEY 없음 · Streamlit Secrets 확인", "URL": ""}])
+    except Exception:
+        pass
+
+    run_key = f"no_click_26api_once_{rc_date}_{meet}_{race_no}"
+    if st.session_state.get(run_key):
+        return data, status if isinstance(status, pd.DataFrame) else pd.DataFrame()
+    st.session_state[run_key] = True
+
+    try:
+        selected = _auto_safe_selected_api_keys()
+        data, status = fetch_all_live(rc_date, meet, int(race_no), selected)
+        st.session_state["live_data"] = data
+        st.session_state["api_status"] = status
+        st.session_state["live_race_key"] = f"{rc_date}|{meet}|{race_no}"
+        return data, status
+    except Exception as e:
+        return {}, pd.DataFrame([{"API": "전체", "key": "ALL", "행수": 0, "상태": f"자동접속 실패: {str(e)[:160]}", "URL": ""}])
+
+def render_no_click_api_excel_viewer(compact: bool = False, meet: str = "서울") -> None:
+    st.markdown("### 📡 26개 API 자동접속 · 바로보기")
+    render_no_click_api_diagnostic()
+    rc_date = today_kst() if "today_kst" in globals() else (now_kst().strftime("%Y%m%d") if "now_kst" in globals() else "")
+    race_no = _detect_current_race_for_no_click(rc_date, meet)
+    data, status = no_click_fetch_26api_snapshot(rc_date, meet, race_no)
+
+    if isinstance(status, pd.DataFrame) and not status.empty:
+        st.markdown("#### API 접속 상태표")
+        show_cols = [c for c in ["API", "key", "행수", "상태", "URL"] if c in status.columns]
+        st.dataframe(status[show_cols] if show_cols else status, use_container_width=True, hide_index=True, height=300 if compact else 420)
+    else:
+        st.warning("API 상태표가 아직 없습니다.")
+
+    if isinstance(data, dict) and data:
+        st.markdown("#### 받은 API 자료")
+        shown = 0
+        for key, df in data.items():
+            try:
+                if df is None:
+                    continue
+                if not isinstance(df, pd.DataFrame):
+                    df = pd.DataFrame(df)
+                if df.empty:
+                    continue
+                label = dict(API_LABELS).get(key, key) if "API_LABELS" in globals() else key
+                st.markdown(f"**{label} · {len(df)}건**")
+                st.dataframe(df.head(200), use_container_width=True, hide_index=True, height=260 if compact else 360)
+                shown += 1
+                if compact and shown >= 5:
+                    st.caption("모바일에서는 상위 5개 수신자료만 먼저 표시합니다.")
+                    break
+            except Exception:
+                continue
+        if shown == 0:
+            st.info("수신된 API 데이터 행이 0건입니다.")
+    else:
+        st.info("수신된 API 데이터가 없습니다. 위 상태표의 원인을 확인하세요.")
+
+
 # DIRECT_ALL_MEET_SCHEDULE_EXCEL_FIX
 def _meet_code(meet: str) -> str:
     m = normalize_meet(meet) if "normalize_meet" in globals() else str(meet)
@@ -4764,6 +5054,8 @@ def _render_mobile_end_or_wait_view(row: Dict[str, Any]) -> None:
 def render_mobile_quick_view() -> None:
     # MOBILE_REAL_COMPACT_RENDER_ONLY
     # MOBILE_NO_BLANK_RENDER_GATE
+    # NO_CLICK_API_VIEWER_MOBILE_APPLY
+    # EXCEL_DETAIL_CENTER_MOBILE_APPLY
     if "_install_auto_refresh" in globals():
         _install_auto_refresh(60, "mobile_compact")
     try:
@@ -4813,6 +5105,8 @@ def render_mobile_quick_view() -> None:
             render_mobile_character_strip()  # MOBILE_CHARACTER_STRIP_APPLY
             render_mobile_api_schedule_status()  # MOBILE_API_STATUS_RENDER_APPLY
             render_direct_schedule_excel_viewer(compact=True)  # DIRECT_SCHEDULE_VIEWER_MOBILE_APPLY
+            render_no_click_api_excel_viewer(compact=True, meet="서울")  # NO_CLICK_API_VIEWER_MOBILE_APPLY
+            render_excel_detail_workbook_center(st.session_state.get("live_data", {}), st.session_state.get("api_status", pd.DataFrame()), compact=True)  # EXCEL_DETAIL_CENTER_MOBILE_APPLY
             render_api_received_file_viewer(st.session_state.get("live_data", {}), st.session_state.get("api_status", pd.DataFrame()), compact=True)  # MOBILE_API_RECEIVED_FILE_VIEWER_APPLY
             return
 
@@ -4820,9 +5114,10 @@ def render_mobile_quick_view() -> None:
     render_mobile_character_strip()  # MOBILE_CHARACTER_STRIP_APPLY
     render_mobile_api_schedule_status()  # MOBILE_API_STATUS_RENDER_APPLY
     render_direct_schedule_excel_viewer(compact=True)  # DIRECT_SCHEDULE_VIEWER_MOBILE_APPLY
+    render_no_click_api_excel_viewer(compact=True, meet="서울")  # NO_CLICK_API_VIEWER_MOBILE_APPLY
+    render_excel_detail_workbook_center(st.session_state.get("live_data", {}), st.session_state.get("api_status", pd.DataFrame()), compact=True)  # EXCEL_DETAIL_CENTER_MOBILE_APPLY
     render_api_received_file_viewer(st.session_state.get("live_data", {}), st.session_state.get("api_status", pd.DataFrame()), compact=True)  # MOBILE_API_RECEIVED_FILE_VIEWER_APPLY
     return
-
 
 
 def load_auto_analysis_log() -> pd.DataFrame:
@@ -5911,6 +6206,8 @@ def render_live_panel(rc_date: str, meet: str, race_no: int, selected: List[str]
     render_weekly_agent_center()  # WEEKLY_AGENT_CENTER_RENDER_APPLY
     render_api_schedule_visibility_center(st.session_state.get("api_status", pd.DataFrame()), st.session_state.get("live_data", {}))  # PC_API_STATUS_CENTER_RENDER_APPLY
     render_direct_schedule_excel_viewer(compact=False)  # DIRECT_SCHEDULE_VIEWER_PC_APPLY
+    render_no_click_api_excel_viewer(compact=False, meet=meet)  # NO_CLICK_API_VIEWER_PC_APPLY
+    render_excel_detail_workbook_center(st.session_state.get("live_data", {}), st.session_state.get("api_status", pd.DataFrame()), rc_date, meet, race_no, compact=False)  # EXCEL_DETAIL_CENTER_PC_APPLY
     render_api_received_file_viewer(st.session_state.get("live_data", {}), st.session_state.get("api_status", pd.DataFrame()), rc_date, meet, race_no, compact=False)  # PC_API_RECEIVED_FILE_VIEWER_APPLY
     should_auto_fetch = bool(auto_allowed)
     if run or run_sim or should_auto_fetch:
