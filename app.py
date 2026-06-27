@@ -2623,6 +2623,8 @@ def smart_selected_apis(mode: str, manual_selected: List[str]) -> List[str]:
         return [k for k, _ in API_LABELS]
     if mode == "허브만 분석":
         return []
+    if mode == "실시간 API 우선 + 허브 보조":
+        return [k for k, _ in API_LABELS]
     if mode == "아침 사전수집":
         return DAILY_PRELOAD_KEYS + RACE_TIME_KEYS
     if mode == "경주 전 1회수집":
@@ -2654,7 +2656,11 @@ def smart_selected_apis(mode: str, manual_selected: List[str]) -> List[str]:
 
 
 def smart_default_refresh_seconds(mode: str) -> int:
-    if mode in ["허브만 분석", "아침 사전수집"]:
+    if mode == "허브만 분석":
+        return 0
+    if mode == "실시간 API 우선 + 허브 보조":
+        return 60
+    if mode == "아침 사전수집":
         return 0
     if mode == "경주 전 1회수집":
         return 300
@@ -4076,6 +4082,116 @@ def render_mobile_character_strip() -> None:
 
 
 
+
+# SOURCE_TRUTH_AND_HUB_MODE_FIX
+def _source_truth_snapshot(data=None, status_df=None, selected=None, collection_mode: str = "") -> Dict[str, Any]:
+    data = data if data is not None else st.session_state.get("live_data", {}) or {}
+    status_df = status_df if status_df is not None else st.session_state.get("api_status", pd.DataFrame())
+    selected = selected if selected is not None else []
+    collection_mode = collection_mode or st.session_state.get("collection_mode", "실시간 API 우선 + 허브 보조")
+    snap = {
+        "확인시각": now_str() if "now_str" in globals() else str(datetime.datetime.now()),
+        "수집모드": collection_mode,
+        "모드해석": "",
+        "API호출대상수": len(selected or []),
+        "API성공수": 0,
+        "API총행수": 0,
+        "허브상태": {},
+        "API상태": [],
+        "주의": [],
+    }
+    if collection_mode == "허브만 분석":
+        snap["모드해석"] = "API를 호출하지 않고 허브/캐시만 읽는 모드입니다."
+        snap["주의"].append("허브만 분석 모드에서는 26개 API 접속이 0개가 정상입니다.")
+        snap["주의"].append("실전 추천을 받으려면 '실시간 API 우선 + 허브 보조' 또는 '전체 26개'로 바꾸세요.")
+    elif collection_mode == "실시간 API 우선 + 허브 보조":
+        snap["모드해석"] = "공식 API를 먼저 호출하고, 실패/0건일 때 허브 저장값을 보조로 사용합니다."
+    else:
+        snap["모드해석"] = "선택한 모드에 따라 일부 API만 호출합니다."
+
+    try:
+        if isinstance(data, dict):
+            snap["API총행수"] = int(sum(len(v) for v in data.values() if hasattr(v, "__len__")))
+    except Exception:
+        pass
+
+    try:
+        if isinstance(status_df, pd.DataFrame) and not status_df.empty:
+            ok = 0
+            rows = []
+            for _, r in status_df.iterrows():
+                try:
+                    row_count = int(float(str(r.get("행수", 0)).replace(",", "")))
+                except Exception:
+                    row_count = 0
+                state = str(r.get("상태", "") or r.get("분류", ""))
+                if row_count > 0 or state.upper() in ["OK", "CACHE", "SUCCESS", "성공"]:
+                    ok += 1
+                rows.append({
+                    "API": r.get("API", ""),
+                    "key": r.get("key", ""),
+                    "행수": row_count,
+                    "상태": state,
+                    "URL": str(r.get("URL", ""))[:160],
+                    "자료출처": "공식 API 직접수신" if row_count > 0 else ("허브/캐시" if "CACHE" in state.upper() else "미수신/대기"),
+                })
+            snap["API성공수"] = ok
+            snap["API상태"] = rows
+    except Exception:
+        pass
+
+    try:
+        if "external_hub_load" in globals():
+            for name in ["mobile_recommend", "three_type_recommend", "learning_bigdata", "api_schedule_status", "api_received_files", "pipeline_reason_snapshot"]:
+                try:
+                    val = external_hub_load(name)
+                    if isinstance(val, list):
+                        snap["허브상태"][name] = f"{len(val)}건"
+                    elif isinstance(val, dict):
+                        snap["허브상태"][name] = "있음" if val else "없음"
+                    else:
+                        snap["허브상태"][name] = "있음" if val else "없음"
+                except Exception as e:
+                    snap["허브상태"][name] = f"확인실패: {str(e)[:60]}"
+        else:
+            snap["허브상태"]["허브함수"] = "없음"
+    except Exception:
+        pass
+
+    if snap["API호출대상수"] == 0:
+        snap["주의"].append("현재 호출 대상 API가 0개입니다. 사이드바 수집모드를 확인하세요.")
+    if snap["API총행수"] == 0 and collection_mode != "허브만 분석":
+        snap["주의"].append("API 호출 모드인데 수신 행수가 0건입니다. API Key/승인/URL/공공데이터 응답 상태를 확인해야 합니다.")
+    return snap
+
+def render_source_truth_center(data=None, status_df=None, selected=None, collection_mode: str = "") -> None:
+    st.markdown("### 🧾 자료 출처 확인센터")
+    snap = _source_truth_snapshot(data, status_df, selected, collection_mode)
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("수집모드", snap.get("수집모드", "-")[:12])
+    c2.metric("호출대상 API", snap.get("API호출대상수", 0))
+    c3.metric("API 성공", snap.get("API성공수", 0))
+    c4.metric("수신 총행수", snap.get("API총행수", 0))
+    st.info(snap.get("모드해석", ""))
+    for w in snap.get("주의", []):
+        st.warning(w)
+
+    hub_rows = [{"허브시트/항목": k, "상태": v} for k, v in snap.get("허브상태", {}).items()]
+    if hub_rows:
+        st.markdown("#### 허브 저장 상태")
+        st.dataframe(pd.DataFrame(hub_rows), use_container_width=True, hide_index=True, height=220)
+
+    api_rows = snap.get("API상태", [])
+    if api_rows:
+        st.markdown("#### API별 직접수신/허브/캐시 출처")
+        st.dataframe(pd.DataFrame(api_rows), use_container_width=True, hide_index=True, height=360)
+    else:
+        st.caption("아직 API 상태표가 없습니다. 수집모드가 허브만 분석이면 API 상태표가 비어 있을 수 있습니다.")
+
+    with st.expander("자료 출처 전체 JSON", expanded=False):
+        st.json(snap)
+
+
 # FULL_PIPELINE_AUDIT_AND_REASON_CENTER_FIX
 def _count_rows_in_data(data: Dict[str, Any], key: str) -> int:
     try:
@@ -5214,6 +5330,7 @@ def render_mobile_quick_view() -> None:
     # NO_CLICK_API_VIEWER_MOBILE_APPLY
     # EXCEL_DETAIL_CENTER_MOBILE_APPLY
     # PIPELINE_REASON_CENTER_MOBILE_APPLY
+    # SOURCE_TRUTH_CENTER_MOBILE_APPLY
     if "_install_auto_refresh" in globals():
         _install_auto_refresh(60, "mobile_compact")
     try:
@@ -5261,6 +5378,7 @@ def render_mobile_quick_view() -> None:
         if not _mobile_has_any_real_recommend(latest):
             _render_mobile_end_or_wait_view(latest)
             render_pipeline_reason_center("", "서울", "", compact=True)  # PIPELINE_REASON_CENTER_MOBILE_APPLY
+            render_source_truth_center(st.session_state.get("live_data", {}), st.session_state.get("api_status", pd.DataFrame()), None, st.session_state.get("collection_mode", "실시간 API 우선 + 허브 보조"))  # SOURCE_TRUTH_CENTER_MOBILE_APPLY
             render_mobile_character_strip()  # MOBILE_CHARACTER_STRIP_APPLY
             render_mobile_api_schedule_status()  # MOBILE_API_STATUS_RENDER_APPLY
             render_direct_schedule_excel_viewer(compact=True)  # DIRECT_SCHEDULE_VIEWER_MOBILE_APPLY
@@ -5271,6 +5389,7 @@ def render_mobile_quick_view() -> None:
 
     _render_mobile_compact_3type_view(latest)
     render_pipeline_reason_center("", "서울", "", compact=True)  # PIPELINE_REASON_CENTER_MOBILE_APPLY
+    render_source_truth_center(st.session_state.get("live_data", {}), st.session_state.get("api_status", pd.DataFrame()), None, st.session_state.get("collection_mode", "실시간 API 우선 + 허브 보조"))  # SOURCE_TRUTH_CENTER_MOBILE_APPLY
     render_mobile_character_strip()  # MOBILE_CHARACTER_STRIP_APPLY
     render_mobile_api_schedule_status()  # MOBILE_API_STATUS_RENDER_APPLY
     render_direct_schedule_excel_viewer(compact=True)  # DIRECT_SCHEDULE_VIEWER_MOBILE_APPLY
@@ -6367,6 +6486,7 @@ def render_live_panel(rc_date: str, meet: str, race_no: int, selected: List[str]
     render_api_schedule_visibility_center(st.session_state.get("api_status", pd.DataFrame()), st.session_state.get("live_data", {}))  # PC_API_STATUS_CENTER_RENDER_APPLY
     render_direct_schedule_excel_viewer(compact=False)  # DIRECT_SCHEDULE_VIEWER_PC_APPLY
     render_pipeline_reason_center(rc_date, meet, race_no, compact=False)  # PIPELINE_REASON_CENTER_PC_APPLY
+    render_source_truth_center(st.session_state.get("live_data", {}), st.session_state.get("api_status", pd.DataFrame()), selected, collection_mode)  # SOURCE_TRUTH_CENTER_PC_APPLY
     render_no_click_api_excel_viewer(compact=False, meet=meet)  # NO_CLICK_API_VIEWER_PC_APPLY
     render_excel_detail_workbook_center(st.session_state.get("live_data", {}), st.session_state.get("api_status", pd.DataFrame()), rc_date, meet, race_no, compact=False)  # EXCEL_DETAIL_CENTER_PC_APPLY
     render_api_received_file_viewer(st.session_state.get("live_data", {}), st.session_state.get("api_status", pd.DataFrame()), rc_date, meet, race_no, compact=False)  # PC_API_RECEIVED_FILE_VIEWER_APPLY
@@ -6742,7 +6862,7 @@ def render() -> None:
         st.session_state["race_time_text"] = race_time_text
         sim_count = st.slider("시뮬레이션", 300, 5000, 1200, step=100)
         risk_mode = st.selectbox("전략", ["균형형", "안전형", "공격형"], index=0)
-        collection_mode = st.selectbox("API 수집 모드", ["스마트 자동", "아침 사전수집", "경주 전 1회수집", "실시간 집중", "허브만 분석", "수동 ON/OFF", "전체 26개"], index=4, help="첫 화면 로딩 방지를 위해 기본값은 허브만 분석입니다. 실시간 수집은 버튼을 눌러 실행하세요.")
+        collection_mode = st.selectbox("API 수집 모드", ["실시간 API 우선 + 허브 보조", "스마트 자동", "아침 사전수집", "경주 전 1회수집", "실시간 집중", "허브만 분석", "수동 ON/OFF", "전체 26개"], index=0, help="기본값은 실시간 API를 먼저 확인하고, 실패/0건일 때만 허브 캐시를 보조로 사용합니다. 허브만 분석은 API를 호출하지 않는 확인용 모드입니다.")
         st.session_state["collection_mode"] = collection_mode
         default_refresh = smart_default_refresh_seconds(collection_mode)
         refresh_options = [0, 60, 120, 300, 600, 3600]
@@ -6753,6 +6873,8 @@ def render() -> None:
         selected = [k for k, _ in API_LABELS if switches.get(k, False)]
         selected = smart_selected_apis(collection_mode, selected)
         st.caption(f"이번 수집 대상: {len(selected)}/26개 · 모드: {collection_mode}")
+        if collection_mode == "허브만 분석":
+            st.error("현재 허브만 분석 모드입니다. 이 모드는 공식 API를 호출하지 않습니다. 실전 추천을 받으려면 실시간 API 우선 + 허브 보조로 바꾸세요.")  # HUB_ONLY_MODE_WARNING_APPLY
         if collection_mode == "스마트 자동":
             state = st.session_state.get("smart_window_state", live_window_state(st.session_state.get("race_time_text", "")))
             if state == "20분전_실시간":
