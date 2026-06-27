@@ -4072,6 +4072,178 @@ def render_mobile_character_strip() -> None:
 
 
 
+
+# DIRECT_ALL_MEET_SCHEDULE_EXCEL_FIX
+def _meet_code(meet: str) -> str:
+    m = normalize_meet(meet) if "normalize_meet" in globals() else str(meet)
+    return {"서울": "1", "제주": "2", "부산경남": "3", "부경": "3", "부산": "3"}.get(m, str(meet or ""))
+
+def _meet_endpoint_url_variants(base_url: str, meet: str) -> List[str]:
+    """서울 전용 endpoint가 들어와도 부산경남/제주 endpoint 후보까지 직접 시도합니다."""
+    m = normalize_meet(meet) if "normalize_meet" in globals() else str(meet)
+    repls = {
+        "서울": ["Seoul", "seoul", "SEOUL"],
+        "제주": ["Jeju", "jeju", "JEJU"],
+        "부산경남": ["Busan", "busan", "BUSAN", "BusanGyeongnam", "BusanGyeongNam", "Pukyong", "pukyong"],
+    }
+    out = [base_url]
+    # known race endpoint family: SeoulRace_1 / JejuRace_1 / BusanRace_1 etc.
+    for token in repls.get(m, []):
+        for old in ["Seoul", "seoul", "SEOUL", "Jeju", "jeju", "JEJU", "Busan", "busan", "BUSAN", "BusanGyeongnam", "BusanGyeongNam", "Pukyong", "pukyong"]:
+            if old in base_url:
+                out.append(base_url.replace(old, token))
+    seen = []
+    for u in out:
+        if u not in seen:
+            seen.append(u)
+    return seen
+
+def _schedule_request_variants(base_url: str, rc_date: str, meet: str) -> List[str]:
+    """경주일정은 rcNo를 빼고 날짜+경마장 기준으로 직접 요청합니다."""
+    variants = []
+    key = get_api_key() if "get_api_key" in globals() else ""
+    meet_cd = _meet_code(meet)
+    for u in _meet_endpoint_url_variants(base_url, meet):
+        base_params = {"serviceKey": key, "pageNo": 1, "numOfRows": 200}
+        for typ_key in ["resultType", "_type", "type"]:
+            p = dict(base_params)
+            p[typ_key] = "json"
+            variants.append(add_or_replace_params(u, p))
+        for date_name in ["rcDate", "raceDate", "meetDate", "ymd"]:
+            for meet_name in ["meet", "meetCd", "rcourse", "raceTrack"]:
+                p = dict(base_params)
+                p.update({date_name: rc_date, meet_name: meet_cd, "resultType": "json"})
+                variants.append(add_or_replace_params(u, p))
+        # 일부 API는 날짜만 있어도 전체 경주일정이 내려옵니다.
+        for date_name in ["rcDate", "raceDate", "meetDate", "ymd"]:
+            p = dict(base_params)
+            p.update({date_name: rc_date, "resultType": "json"})
+            variants.append(add_or_replace_params(u, p))
+    seen, out = set(), []
+    for v in variants:
+        if v not in seen:
+            seen.add(v)
+            out.append(v)
+    return out
+
+def fetch_schedule_direct_for_meet(rc_date: str, meet: str) -> Tuple[pd.DataFrame, List[Dict[str, Any]]]:
+    """서울/부산경남/제주 경주일정을 API에서 직접 받아 화면에서 바로 볼 수 있게 합니다."""
+    logs = []
+    frames = []
+    keys = ["race_url", "race_overview_url"]
+    for key in keys:
+        try:
+            base_url = get_url(key) if "get_url" in globals() else ""
+        except Exception:
+            base_url = ""
+        if not base_url:
+            logs.append({"경마장": meet, "API": key, "상태": "URL 없음", "행수": 0})
+            continue
+        for req_url in _schedule_request_variants(base_url, rc_date, meet)[:18]:
+            try:
+                r = safe_get_url(req_url, timeout=8) if "safe_get_url" in globals() else requests.get(req_url, timeout=8)
+                if r.status_code != 200:
+                    logs.append({"경마장": meet, "API": key, "상태": f"HTTP {r.status_code}", "행수": 0, "URL": req_url[:160]})
+                    continue
+                text = r.text.strip()
+                if any(w in text for w in ["SERVICE_KEY_IS_NOT_REGISTERED", "INVALID_REQUEST_PARAMETER", "SERVICE_ACCESS_DENIED", "LIMITED_NUMBER_OF_SERVICE_REQUESTS_EXCEEDS_ERROR", "NO_OPENAPI_SERVICE_ERROR"]):
+                    logs.append({"경마장": meet, "API": key, "상태": text[:100], "행수": 0, "URL": req_url[:160]})
+                    continue
+                ctype = r.headers.get("content-type", "").lower()
+                if text.startswith("{") or text.startswith("[") or "json" in ctype:
+                    try:
+                        df = json_to_df(r.json()) if "json_to_df" in globals() else pd.DataFrame()
+                    except Exception:
+                        df = pd.DataFrame()
+                else:
+                    df = xml_to_df(text) if "xml_to_df" in globals() else pd.DataFrame()
+                if isinstance(df, pd.DataFrame) and not df.empty:
+                    df["경마장"] = meet
+                    df["수신API"] = key
+                    frames.append(df)
+                    logs.append({"경마장": meet, "API": key, "상태": "OK", "행수": len(df), "URL": req_url[:160]})
+                    break
+                logs.append({"경마장": meet, "API": key, "상태": "200 / 0건", "행수": 0, "URL": req_url[:160]})
+            except Exception as e:
+                logs.append({"경마장": meet, "API": key, "상태": str(e)[:100], "행수": 0})
+    if frames:
+        raw = pd.concat(frames, ignore_index=True)
+        sched = extract_schedule_from_data({"race_url": raw}, rc_date, meet) if "extract_schedule_from_data" in globals() else raw
+        if isinstance(sched, pd.DataFrame) and not sched.empty:
+            sched["경마장"] = sched.get("경마장", meet)
+            return sched.drop_duplicates(), logs
+    return pd.DataFrame(), logs
+
+def fetch_all_meet_schedule_direct(rc_date: str = "") -> Tuple[pd.DataFrame, pd.DataFrame]:
+    if not rc_date:
+        rc_date = today_kst() if "today_kst" in globals() else (now_kst().strftime("%Y%m%d") if "now_kst" in globals() else "")
+    schedules, logs = [], []
+    for meet in ["서울", "부산경남", "제주"]:
+        df, lg = fetch_schedule_direct_for_meet(rc_date, meet)
+        logs.extend(lg)
+        if isinstance(df, pd.DataFrame) and not df.empty:
+            schedules.append(df)
+    out = pd.concat(schedules, ignore_index=True) if schedules else pd.DataFrame()
+    if isinstance(out, pd.DataFrame) and not out.empty:
+        try:
+            out = out.drop_duplicates(subset=[c for c in ["날짜", "경마장", "경주번호"] if c in out.columns]).sort_values([c for c in ["경마장", "경주번호"] if c in out.columns])
+        except Exception:
+            pass
+        try:
+            p = DATA_DIR / "race_schedule_all_meets.csv" if "DATA_DIR" in globals() else Path("race_schedule_all_meets.csv")
+            out.to_csv(p, index=False, encoding="utf-8-sig")
+        except Exception:
+            pass
+    log_df = pd.DataFrame(logs)
+    try:
+        p2 = DATA_DIR / "race_schedule_fetch_log.csv" if "DATA_DIR" in globals() else Path("race_schedule_fetch_log.csv")
+        log_df.to_csv(p2, index=False, encoding="utf-8-sig")
+    except Exception:
+        pass
+    return out, log_df
+
+def render_direct_schedule_excel_viewer(compact: bool = False) -> None:
+    """다운로드/expander 없이 바로 보이는 전체 경마장 경주일정 엑셀 뷰어."""
+    st.markdown("### 🗓️ 전체 경마장 경주일정 바로보기")
+    rc_date = today_kst() if "today_kst" in globals() else (now_kst().strftime("%Y%m%d") if "now_kst" in globals() else "")
+    col1, col2 = st.columns([1, 1])
+    with col1:
+        st.caption(f"대상일자: {rc_date}")
+    with col2:
+        force = st.button("🔄 서울·부산경남·제주 일정 다시 받기", key=f"direct_schedule_reload_{'m' if compact else 'p'}", width="stretch")
+
+    cache_key = f"direct_all_meet_schedule_{rc_date}"
+    log_key = f"direct_all_meet_schedule_log_{rc_date}"
+    if force or cache_key not in st.session_state:
+        with st.spinner("서울·부산경남·제주 경주일정 API 직접 수신 중..."):
+            sched, log_df = fetch_all_meet_schedule_direct(rc_date)
+            st.session_state[cache_key] = sched
+            st.session_state[log_key] = log_df
+    else:
+        sched = st.session_state.get(cache_key, pd.DataFrame())
+        log_df = st.session_state.get(log_key, pd.DataFrame())
+
+    if isinstance(sched, pd.DataFrame) and not sched.empty:
+        meet_col = "경마장" if "경마장" in sched.columns else None
+        if meet_col:
+            counts = sched.groupby(meet_col).size().to_dict()
+            st.success(" / ".join([f"{k} {v}경주" for k, v in counts.items()]))
+        show_cols = [c for c in ["날짜", "경마장", "경주번호", "경주시간", "경주시각"] if c in sched.columns]
+        if not show_cols:
+            show_cols = list(sched.columns)[:12]
+        st.dataframe(sched[show_cols], use_container_width=True, hide_index=True, height=360 if compact else 520)
+    else:
+        st.error("서울·부산경남·제주 경주일정을 직접 받지 못했습니다.")
+        st.caption("아래 API 접속 로그에서 HTTP 오류, 0건, 키 오류를 확인하세요.")
+
+    st.markdown("#### API 접속 로그")
+    if isinstance(log_df, pd.DataFrame) and not log_df.empty:
+        cols = [c for c in ["경마장", "API", "상태", "행수"] if c in log_df.columns]
+        st.dataframe(log_df[cols], use_container_width=True, hide_index=True, height=260 if compact else 380)
+    else:
+        st.info("접속 로그가 없습니다.")
+
+
 # API_RECEIVED_FILE_VIEWER_FIX
 def _api_received_dir() -> Path:
     d = DATA_DIR / "api_received_files" if "DATA_DIR" in globals() else Path("maru_kra_data") / "api_received_files"
@@ -4640,12 +4812,14 @@ def render_mobile_quick_view() -> None:
             _render_mobile_end_or_wait_view(latest)
             render_mobile_character_strip()  # MOBILE_CHARACTER_STRIP_APPLY
             render_mobile_api_schedule_status()  # MOBILE_API_STATUS_RENDER_APPLY
+            render_direct_schedule_excel_viewer(compact=True)  # DIRECT_SCHEDULE_VIEWER_MOBILE_APPLY
             render_api_received_file_viewer(st.session_state.get("live_data", {}), st.session_state.get("api_status", pd.DataFrame()), compact=True)  # MOBILE_API_RECEIVED_FILE_VIEWER_APPLY
             return
 
     _render_mobile_compact_3type_view(latest)
     render_mobile_character_strip()  # MOBILE_CHARACTER_STRIP_APPLY
     render_mobile_api_schedule_status()  # MOBILE_API_STATUS_RENDER_APPLY
+    render_direct_schedule_excel_viewer(compact=True)  # DIRECT_SCHEDULE_VIEWER_MOBILE_APPLY
     render_api_received_file_viewer(st.session_state.get("live_data", {}), st.session_state.get("api_status", pd.DataFrame()), compact=True)  # MOBILE_API_RECEIVED_FILE_VIEWER_APPLY
     return
 
@@ -5736,6 +5910,7 @@ def render_live_panel(rc_date: str, meet: str, race_no: int, selected: List[str]
     render_self_learning_control_center()  # SELF_LEARNING_CENTER_RENDER_APPLY
     render_weekly_agent_center()  # WEEKLY_AGENT_CENTER_RENDER_APPLY
     render_api_schedule_visibility_center(st.session_state.get("api_status", pd.DataFrame()), st.session_state.get("live_data", {}))  # PC_API_STATUS_CENTER_RENDER_APPLY
+    render_direct_schedule_excel_viewer(compact=False)  # DIRECT_SCHEDULE_VIEWER_PC_APPLY
     render_api_received_file_viewer(st.session_state.get("live_data", {}), st.session_state.get("api_status", pd.DataFrame()), rc_date, meet, race_no, compact=False)  # PC_API_RECEIVED_FILE_VIEWER_APPLY
     should_auto_fetch = bool(auto_allowed)
     if run or run_sim or should_auto_fetch:
