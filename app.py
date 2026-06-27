@@ -4075,6 +4075,163 @@ def render_mobile_character_strip() -> None:
 
 
 
+
+# FULL_PIPELINE_AUDIT_AND_REASON_CENTER_FIX
+def _count_rows_in_data(data: Dict[str, Any], key: str) -> int:
+    try:
+        v = data.get(key)
+        if v is None:
+            return 0
+        if isinstance(v, pd.DataFrame):
+            return len(v)
+        return len(v)
+    except Exception:
+        return 0
+
+def _pipeline_reason_snapshot(rc_date: str = "", meet: str = "서울", race_no: Any = "") -> Dict[str, Any]:
+    rc_date = rc_date or (today_kst() if "today_kst" in globals() else (now_kst().strftime("%Y%m%d") if "now_kst" in globals() else ""))
+    meet = meet or "서울"
+    try:
+        race_no = int(float(race_no or (_detect_current_race_for_no_click(rc_date, meet) if "_detect_current_race_for_no_click" in globals() else 1)))
+    except Exception:
+        race_no = 1
+
+    snap = {
+        "확인시각": now_str() if "now_str" in globals() else str(datetime.datetime.now()),
+        "날짜": rc_date,
+        "경마장": meet,
+        "경주번호": race_no,
+        "최종판정": "확인중",
+        "추천가능": "N",
+        "원인": [],
+        "다음조치": [],
+        "수집": {},
+        "일정": {},
+        "추천": {},
+        "허브": {},
+    }
+
+    try:
+        key_ok = bool(get_api_key()) if "get_api_key" in globals() else False
+        snap["수집"]["API_KEY"] = "있음" if key_ok else "없음"
+        snap["수집"]["키출처"] = get_api_key_source() if "get_api_key_source" in globals() else "-"
+        if not key_ok:
+            snap["원인"].append("공공데이터 API Key가 감지되지 않음")
+            snap["다음조치"].append("Streamlit Secrets에 KRA_API_KEY 저장")
+    except Exception as e:
+        snap["원인"].append(f"API Key 확인 실패: {str(e)[:80]}")
+
+    try:
+        master_on = bool(st.session_state.get("api_master_on", True))
+        snap["수집"]["API_MASTER"] = "ON" if master_on else "OFF"
+        if not master_on:
+            snap["원인"].append("API 마스터 스위치가 OFF")
+            snap["다음조치"].append("PC 사이드바에서 API 전체 ON")
+    except Exception:
+        pass
+
+    try:
+        if "fetch_all_meet_schedule_direct" in globals():
+            schedule_df, schedule_log = fetch_all_meet_schedule_direct(rc_date)
+        else:
+            schedule_df, schedule_log = pd.DataFrame(), pd.DataFrame()
+        snap["일정"]["전체경주일정행수"] = int(len(schedule_df)) if isinstance(schedule_df, pd.DataFrame) else 0
+        if isinstance(schedule_df, pd.DataFrame) and not schedule_df.empty and "경마장" in schedule_df.columns:
+            snap["일정"]["경마장별"] = schedule_df.groupby("경마장").size().to_dict()
+        else:
+            snap["원인"].append("서울/부산경남/제주 경주일정 직접수신 0건")
+            snap["다음조치"].append("경주일정 접속로그에서 HTTP 500/200 0건/키 오류 확인")
+        if isinstance(schedule_log, pd.DataFrame):
+            snap["일정"]["접속로그행수"] = int(len(schedule_log))
+    except Exception as e:
+        snap["원인"].append(f"경주일정 직접수신 실패: {str(e)[:100]}")
+
+    data = st.session_state.get("live_data", {}) or {}
+    status_df = st.session_state.get("api_status", pd.DataFrame())
+    try:
+        if "no_click_fetch_26api_snapshot" in globals():
+            data2, status2 = no_click_fetch_26api_snapshot(rc_date, meet, race_no)
+            if data2:
+                data = data2
+            if isinstance(status2, pd.DataFrame) and not status2.empty:
+                status_df = status2
+    except Exception as e:
+        snap["원인"].append(f"26개 API 자동접속 실패: {str(e)[:120]}")
+
+    try:
+        api_total_rows = sum(_count_rows_in_data(data, k) for k in data.keys()) if isinstance(data, dict) else 0
+        snap["수집"]["API총행수"] = int(api_total_rows)
+        snap["수집"]["출전표행수"] = max(_count_rows_in_data(data, "entry_url"), _count_rows_in_data(data, "entry_registered_url"))
+        snap["수집"]["경주정보행수"] = max(_count_rows_in_data(data, "race_url"), _count_rows_in_data(data, "race_overview_url"))
+        snap["수집"]["배당행수"] = max(_count_rows_in_data(data, "today_odds_url"), _count_rows_in_data(data, "odds_url"), _count_rows_in_data(data, "third_odds_url"))
+        if api_total_rows <= 0:
+            snap["원인"].append("26개 API 수신자료 총행수 0건")
+            snap["다음조치"].append("API 상태표의 URL/상태/HTTP 메시지 확인")
+        if snap["수집"]["출전표행수"] <= 0:
+            snap["원인"].append("출전표/출전등록말 API 0건이라 실제 마번 조합 생성 불가")
+            snap["다음조치"].append("entry_url / entry_registered_url 상태와 승인 여부 확인")
+    except Exception as e:
+        snap["원인"].append(f"API 행수 계산 실패: {str(e)[:80]}")
+
+    try:
+        latest = load_mobile_recommend_json() if "load_mobile_recommend_json" in globals() else {}
+        has_combo = _mobile_has_any_real_recommend(latest) if "_mobile_has_any_real_recommend" in globals() else bool(latest.get("삼쌍승18조합"))
+        snap["추천"]["최근추천저장"] = "있음" if isinstance(latest, dict) and latest else "없음"
+        snap["추천"]["실제3숫자조합"] = "있음" if has_combo else "없음"
+        snap["추천"]["최근저장시각"] = latest.get("저장시각", "-") if isinstance(latest, dict) else "-"
+        if not has_combo:
+            snap["원인"].append("모바일 표시 가능한 실제 3숫자 추천 조합이 없음")
+            snap["다음조치"].append("출전표 3두 이상 수신 후 재분석 필요")
+    except Exception as e:
+        snap["원인"].append(f"추천 저장 확인 실패: {str(e)[:80]}")
+
+    try:
+        if "external_hub_load" in globals():
+            hub_mobile = external_hub_load("mobile_recommend")
+            snap["허브"]["mobile_recommend"] = "있음" if hub_mobile else "없음"
+        else:
+            snap["허브"]["mobile_recommend"] = "허브함수없음"
+    except Exception as e:
+        snap["허브"]["mobile_recommend"] = f"확인실패: {str(e)[:80]}"
+
+    if snap["수집"].get("출전표행수", 0) > 0 and snap["추천"].get("실제3숫자조합") == "있음":
+        snap["최종판정"] = "추천 표시 가능"
+        snap["추천가능"] = "Y"
+    else:
+        snap["최종판정"] = "추천 차단 · 원인 확인 필요"
+        snap["추천가능"] = "N"
+
+    try:
+        if "external_hub_save" in globals():
+            external_hub_save("pipeline_reason_snapshot", snap)
+    except Exception:
+        pass
+    return snap
+
+def render_pipeline_reason_center(rc_date: str = "", meet: str = "서울", race_no: Any = "", compact: bool = False) -> None:
+    st.markdown("### 🧭 추천 없음 원인 분석센터")
+    snap = _pipeline_reason_snapshot(rc_date, meet, race_no)
+    if snap.get("추천가능") == "Y":
+        st.success(f"최종판정: {snap.get('최종판정')}")
+    else:
+        st.error(f"최종판정: {snap.get('최종판정')}")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("API 총행수", snap.get("수집", {}).get("API총행수", 0))
+    c2.metric("출전표", snap.get("수집", {}).get("출전표행수", 0))
+    c3.metric("경주일정", snap.get("일정", {}).get("전체경주일정행수", 0))
+    c4.metric("추천조합", snap.get("추천", {}).get("실제3숫자조합", "없음"))
+    if snap.get("원인"):
+        st.markdown("#### 막힌 이유")
+        for r in snap.get("원인", [])[:12]:
+            st.warning(f"• {r}")
+    if snap.get("다음조치"):
+        st.markdown("#### 바로 할 일")
+        for r in snap.get("다음조치", [])[:12]:
+            st.info(f"• {r}")
+    with st.expander("전체 진단 JSON", expanded=False):
+        st.json(snap)
+
+
 # EXCEL_DETAIL_WORKBOOK_EXPORT_FIX
 def _excel_safe_sheet_name(name: Any, used: Optional[set] = None) -> str:
     used = used if used is not None else set()
@@ -5056,6 +5213,7 @@ def render_mobile_quick_view() -> None:
     # MOBILE_NO_BLANK_RENDER_GATE
     # NO_CLICK_API_VIEWER_MOBILE_APPLY
     # EXCEL_DETAIL_CENTER_MOBILE_APPLY
+    # PIPELINE_REASON_CENTER_MOBILE_APPLY
     if "_install_auto_refresh" in globals():
         _install_auto_refresh(60, "mobile_compact")
     try:
@@ -5102,6 +5260,7 @@ def render_mobile_quick_view() -> None:
             pass
         if not _mobile_has_any_real_recommend(latest):
             _render_mobile_end_or_wait_view(latest)
+            render_pipeline_reason_center("", "서울", "", compact=True)  # PIPELINE_REASON_CENTER_MOBILE_APPLY
             render_mobile_character_strip()  # MOBILE_CHARACTER_STRIP_APPLY
             render_mobile_api_schedule_status()  # MOBILE_API_STATUS_RENDER_APPLY
             render_direct_schedule_excel_viewer(compact=True)  # DIRECT_SCHEDULE_VIEWER_MOBILE_APPLY
@@ -5111,6 +5270,7 @@ def render_mobile_quick_view() -> None:
             return
 
     _render_mobile_compact_3type_view(latest)
+    render_pipeline_reason_center("", "서울", "", compact=True)  # PIPELINE_REASON_CENTER_MOBILE_APPLY
     render_mobile_character_strip()  # MOBILE_CHARACTER_STRIP_APPLY
     render_mobile_api_schedule_status()  # MOBILE_API_STATUS_RENDER_APPLY
     render_direct_schedule_excel_viewer(compact=True)  # DIRECT_SCHEDULE_VIEWER_MOBILE_APPLY
@@ -6206,6 +6366,7 @@ def render_live_panel(rc_date: str, meet: str, race_no: int, selected: List[str]
     render_weekly_agent_center()  # WEEKLY_AGENT_CENTER_RENDER_APPLY
     render_api_schedule_visibility_center(st.session_state.get("api_status", pd.DataFrame()), st.session_state.get("live_data", {}))  # PC_API_STATUS_CENTER_RENDER_APPLY
     render_direct_schedule_excel_viewer(compact=False)  # DIRECT_SCHEDULE_VIEWER_PC_APPLY
+    render_pipeline_reason_center(rc_date, meet, race_no, compact=False)  # PIPELINE_REASON_CENTER_PC_APPLY
     render_no_click_api_excel_viewer(compact=False, meet=meet)  # NO_CLICK_API_VIEWER_PC_APPLY
     render_excel_detail_workbook_center(st.session_state.get("live_data", {}), st.session_state.get("api_status", pd.DataFrame()), rc_date, meet, race_no, compact=False)  # EXCEL_DETAIL_CENTER_PC_APPLY
     render_api_received_file_viewer(st.session_state.get("live_data", {}), st.session_state.get("api_status", pd.DataFrame()), rc_date, meet, race_no, compact=False)  # PC_API_RECEIVED_FILE_VIEWER_APPLY

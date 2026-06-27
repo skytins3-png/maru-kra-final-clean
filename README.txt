@@ -1,10 +1,14 @@
-MARU KRA EXCEL DETAIL EXPORT
+MARU KRA FULL AUDIT RECOVERY
 
-수정:
-- 경주일정 및 26개 API 수신자료를 실제 엑셀 .xlsx 파일로 생성
-- 시트: 요약 / 전체_경주일정 / 경주일정_접속로그 / API_상태표 / API별 수신자료
-- PC/모바일에서 엑셀 상세자료 열기 버튼 제공
-- requirements.txt에 xlsxwriter 포함
+적용:
+1. ZIP 압축 풀기
+2. app.py 덮어쓰기
+3. requirements.txt도 덮어쓰기
+4. Commit changes
+5. Streamlit Cloud Reboot app
 
 모바일:
-https://maru-kra-final-clean.streamlit.app/?mode=mobile&v=exceldata1
+https://maru-kra-final-clean.streamlit.app/?mode=mobile&v=auditrecovery1
+
+PC:
+https://maru-kra-final-clean.streamlit.app/?v=auditrecovery1
