@@ -1,8 +1,10 @@
-MARU KRA MOBILE RACE TIME SELF ANALYZE
+MARU KRA 최신 통합본
 
-수정 목적:
-경주 시간인데 모바일에 추천 없음으로만 뜨는 문제를 막기 위해,
-모바일 추천이 비었을 때 모바일 자체에서 공식 API 수집→분석→허브저장까지 시도합니다.
+적용:
+ZIP 압축 풀기 → app.py만 GitHub 기존 app.py에 덮어쓰기 → Commit → Streamlit Reboot
 
-자동구매/자동결제 없음.
-구매는 수동입력/수동확정.
+PC:
+https://maru-kra-final-clean.streamlit.app/?v=latest_preview
+
+모바일:
+https://maru-kra-final-clean.streamlit.app/?mode=mobile&v=latest_preview
