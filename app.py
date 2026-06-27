@@ -4083,6 +4083,171 @@ def render_mobile_character_strip() -> None:
 
 
 
+
+# ALL_MEET_ALL_RACE_MONITOR_FIX
+def _parse_schedule_dt_for_monitor(row: Dict[str, Any]) -> Optional[datetime.datetime]:
+    try:
+        if row.get("경주시각"):
+            return pd.to_datetime(row.get("경주시각"), errors="coerce").to_pydatetime()
+    except Exception:
+        pass
+    try:
+        t = str(row.get("경주시간", "") or "").strip()
+        if "_parse_hhmm_to_today" in globals():
+            return _parse_hhmm_to_today(t)
+    except Exception:
+        pass
+    return None
+
+def load_all_meet_schedule_for_monitor(rc_date: str) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """서울/부산경남/제주 전체 경주일정을 한 번에 가져와 모니터링용으로 반환합니다."""
+    sched = pd.DataFrame()
+    log_df = pd.DataFrame()
+    try:
+        if "fetch_all_meet_schedule_direct" in globals():
+            sched, log_df = fetch_all_meet_schedule_direct(rc_date)
+    except Exception as e:
+        log_df = pd.DataFrame([{"경마장": "전체", "API": "schedule", "상태": f"직접수신 실패: {str(e)[:120]}", "행수": 0}])
+
+    if sched is None or not isinstance(sched, pd.DataFrame) or sched.empty:
+        frames = []
+        for m in ["서울", "부산경남", "제주"]:
+            try:
+                df = _load_schedule_for_sidebar(rc_date, m) if "_load_schedule_for_sidebar" in globals() else pd.DataFrame()
+                if isinstance(df, pd.DataFrame) and not df.empty:
+                    if "경마장" not in df.columns:
+                        df["경마장"] = m
+                    frames.append(df)
+            except Exception:
+                pass
+        if frames:
+            sched = pd.concat(frames, ignore_index=True)
+
+    if sched is None or not isinstance(sched, pd.DataFrame):
+        sched = pd.DataFrame()
+
+    if not sched.empty:
+        if "경마장" not in sched.columns:
+            sched["경마장"] = "미상"
+        if "경주번호" in sched.columns:
+            try:
+                sched["경주번호"] = pd.to_numeric(sched["경주번호"], errors="coerce").fillna(0).astype(int)
+            except Exception:
+                pass
+        try:
+            sched = sched.drop_duplicates(subset=[c for c in ["날짜", "경마장", "경주번호"] if c in sched.columns])
+            sort_cols = [c for c in ["경마장", "경주번호"] if c in sched.columns]
+            if sort_cols:
+                sched = sched.sort_values(sort_cols)
+        except Exception:
+            pass
+    return sched, log_df
+
+def _schedule_monitor_status(dt: Optional[datetime.datetime]) -> str:
+    if not dt:
+        return "시간미확인"
+    now = now_kst() if "now_kst" in globals() else datetime.datetime.now()
+    mins = int((dt - now).total_seconds() // 60)
+    if mins > 25:
+        return f"대기 {mins}분전"
+    if -20 <= mins <= 25:
+        return f"수집창 {mins}분"
+    if mins < -20:
+        return "종료/결과확인"
+    return "대기"
+
+def _current_or_next_races(sched: pd.DataFrame, per_meet: int = 3) -> pd.DataFrame:
+    if sched is None or sched.empty:
+        return pd.DataFrame()
+    df = sched.copy()
+    dts = []
+    for _, r in df.iterrows():
+        dts.append(_parse_schedule_dt_for_monitor(dict(r)))
+    df["_dt"] = dts
+    df["상태"] = [_schedule_monitor_status(x) for x in dts]
+    now = now_kst() if "now_kst" in globals() else datetime.datetime.now()
+    out = []
+    for meet, g in df.groupby("경마장", dropna=False):
+        gg = g.copy()
+        if "_dt" in gg.columns:
+            future = gg[gg["_dt"].notna() & (gg["_dt"] >= now - datetime.timedelta(minutes=20))]
+            if not future.empty:
+                gg = future.sort_values("_dt").head(per_meet)
+            else:
+                gg = g.tail(per_meet)
+        else:
+            gg = g.head(per_meet)
+        out.append(gg)
+    return pd.concat(out, ignore_index=True) if out else pd.DataFrame()
+
+def render_all_meet_all_race_monitor(rc_date: str, selected: List[str], sim_count: int, risk_mode: str) -> None:
+    """서울 1R 고정 대신 모든 경마장/모든 경주일정을 확인하는 전체 관제 화면."""
+    st.markdown("### 🌐 전체 경마장 · 전체 경주일정 관제")
+    st.caption("서울/부산경남/제주 경주일정을 모두 확인하고, 현재 수집창에 들어온 경주를 자동 점검합니다.")
+
+    sched, log_df = load_all_meet_schedule_for_monitor(rc_date)
+    if sched.empty:
+        st.error("전체 경마장 경주일정을 받지 못했습니다.")
+        if isinstance(log_df, pd.DataFrame) and not log_df.empty:
+            st.dataframe(log_df, use_container_width=True, hide_index=True)
+        return
+
+    try:
+        counts = sched.groupby("경마장").size().to_dict()
+        st.success(" / ".join([f"{k} {v}경주" for k, v in counts.items()]))
+    except Exception:
+        pass
+
+    display_cols = [c for c in ["날짜", "경마장", "경주번호", "경주시간", "경주시각"] if c in sched.columns]
+    if display_cols:
+        st.markdown("#### 오늘 전체 경주일정")
+        st.dataframe(sched[display_cols], use_container_width=True, hide_index=True, height=360)
+
+    targets = _current_or_next_races(sched, per_meet=3)
+    if targets.empty:
+        st.warning("현재/다음 경주를 계산하지 못했습니다.")
+        return
+
+    st.markdown("#### 현재/다음 점검 대상")
+    show_cols = [c for c in ["경마장", "경주번호", "경주시간", "상태"] if c in targets.columns]
+    st.dataframe(targets[show_cols], use_container_width=True, hide_index=True, height=260)
+
+    st.markdown("#### 경마장별 첫 대상 자동 API 점검")
+    result_rows = []
+    for meet, g in targets.groupby("경마장", dropna=False):
+        try:
+            row = g.iloc[0].to_dict()
+            race_no = int(float(row.get("경주번호", 1) or 1))
+            data, status = no_click_fetch_26api_snapshot(rc_date, str(meet), race_no) if "no_click_fetch_26api_snapshot" in globals() else ({}, pd.DataFrame())
+            total_rows = 0
+            entry_rows = 0
+            if isinstance(data, dict):
+                total_rows = sum(len(v) for v in data.values() if hasattr(v, "__len__"))
+                entry_rows = max(len(data.get("entry_url", pd.DataFrame())) if hasattr(data.get("entry_url", pd.DataFrame()), "__len__") else 0,
+                                 len(data.get("entry_registered_url", pd.DataFrame())) if hasattr(data.get("entry_registered_url", pd.DataFrame()), "__len__") else 0)
+            ok_api = 0
+            if isinstance(status, pd.DataFrame) and not status.empty:
+                try:
+                    ok_api = int((pd.to_numeric(status.get("행수", 0), errors="coerce").fillna(0) > 0).sum())
+                except Exception:
+                    ok_api = 0
+            result_rows.append({
+                "경마장": meet,
+                "경주번호": race_no,
+                "경주시간": row.get("경주시간", ""),
+                "API성공": ok_api,
+                "총행수": total_rows,
+                "출전표행수": entry_rows,
+                "추천가능": "가능" if entry_rows >= 3 else "출전표 부족",
+            })
+        except Exception as e:
+            result_rows.append({"경마장": meet, "오류": str(e)[:120]})
+    if result_rows:
+        st.dataframe(pd.DataFrame(result_rows), use_container_width=True, hide_index=True)
+
+    st.info("추천은 서울 1R 고정이 아니라 위 표의 현재/다음 경주를 기준으로 확인합니다. 특정 경주를 깊게 분석하려면 사이드바에서 선택 경마장 모드로 바꾸면 됩니다.")
+
+
 # SOURCE_TRUTH_AND_HUB_MODE_FIX
 def _source_truth_snapshot(data=None, status_df=None, selected=None, collection_mode: str = "") -> Dict[str, Any]:
     data = data if data is not None else st.session_state.get("live_data", {}) or {}
@@ -6856,8 +7021,15 @@ def render() -> None:
                     st.warning("API Key를 입력해 주세요.")
 
         rc_date = st.text_input("분석 날짜", value=today_kst())
-        meet = st.selectbox("경마장", ["서울", "부산경남", "제주"], index=0)
-        race_no = st.number_input("경주번호", min_value=1, max_value=20, value=1, step=1)
+        race_scope = st.selectbox("운영 범위", ["전체 경마장 자동", "선택 경마장/경주"], index=0, help="전체 경마장 자동은 서울·부산경남·제주 모든 경주일정을 확인합니다. 서울 1R에 고정하지 않습니다.")
+        st.session_state["race_scope"] = race_scope
+        if race_scope == "전체 경마장 자동":
+            meet = "전체"
+            race_no = 0
+            st.success("서울·부산경남·제주 전체 경주일정 자동 확인 모드")
+        else:
+            meet = st.selectbox("경마장", ["서울", "부산경남", "제주"], index=0)
+            race_no = st.number_input("경주번호", min_value=1, max_value=20, value=1, step=1)
         race_time_text = st.text_input("경주 예정시각", value=st.session_state.get("race_time_text", ""), placeholder="예: 14:30")
         st.session_state["race_time_text"] = race_time_text
         sim_count = st.slider("시뮬레이션", 300, 5000, 1200, step=100)
@@ -6888,25 +7060,34 @@ def render() -> None:
 
     tab1, tab2, tab3, tab4, tab5 = st.tabs(["🏇 실시간 분석", "🎯 삼쌍승18장/배당", "🔌 API/허브", "⏱ 스마트수집", "📘 도움말"])
     with tab1:
-        score_df, result, combos, data, status, env = render_live_panel(rc_date, meet, int(race_no), selected, int(sim_count), risk_mode)
+        if st.session_state.get("race_scope") == "전체 경마장 자동":
+            render_all_meet_all_race_monitor(rc_date, selected, int(sim_count), risk_mode)
+            score_df, result, combos, data, status, env = pd.DataFrame(), {}, [], st.session_state.get("live_data", {}), st.session_state.get("api_status", pd.DataFrame()), {}
+        else:
+            score_df, result, combos, data, status, env = render_live_panel(rc_date, meet, int(race_no), selected, int(sim_count), risk_mode)
     with tab2:
         # Use last/live result if available; otherwise calculate sample instantly.
         if "live_data" in st.session_state:
             data2 = st.session_state.get("live_data", {})
         else:
             data2 = {}
-        env2 = fetch_weather(meet)
-        base2 = build_base_horses(data2, rc_date, meet, int(race_no))
-        horses2 = merge_score_features(base2, data2, rc_date, meet, int(race_no))
+        meet2 = "서울" if str(meet) == "전체" else meet
+        race_no2 = 1 if int(race_no or 0) <= 0 else int(race_no)
+        env2 = fetch_weather(meet2)
+        base2 = build_base_horses(data2, rc_date, meet2, race_no2)
+        horses2 = merge_score_features(base2, data2, rc_date, meet2, race_no2)
         _, result2, _ = score_and_recommend(horses2, env2, int(sim_count), risk_mode)
-        render_triple18_dashboard_module(result2, meet)
+        render_triple18_dashboard_module(result2, meet2)
     with tab3:
         status2 = st.session_state.get("api_status", pd.DataFrame())
         data3 = st.session_state.get("live_data", {})
         st.success("✅ API URL 26개 자동 탑재 완료: 재입력 없이 호출/ON-OFF만 사용")
         render_api_hub_panel(status2, data3)
     with tab4:
-        render_smart_collection_panel(rc_date, meet, int(race_no))
+        if st.session_state.get("race_scope") == "전체 경마장 자동":
+            render_all_meet_all_race_monitor(rc_date, selected, int(sim_count), risk_mode)
+        else:
+            render_smart_collection_panel(rc_date, meet, int(race_no))
     with tab5:
         render_help_panel()
 
