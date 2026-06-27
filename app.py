@@ -4215,6 +4215,8 @@ def render_all_meet_all_race_monitor(rc_date: str, selected: List[str], sim_coun
     st.dataframe(targets[show_cols], use_container_width=True, hide_index=True, height=260)
 
     render_force_real_collection_center(rc_date, selected, targets)  # FORCE_REAL_COLLECTION_CENTER_ALL_MEET_APPLY
+    render_sequential_26api_center(rc_date, "서울", 1)  # SEQUENTIAL_26API_ALL_MEET_APPLY
+    render_recommendation_after_each_race_center(rc_date, "서울", 1)  # EACH_RACE_RECOMMEND_CENTER_ALL_MEET_APPLY
 
     st.markdown("#### 경마장별 첫 대상 자동 API 점검")
     result_rows = []
@@ -6778,31 +6780,312 @@ def render_live_panel(rc_date: str, meet: str, race_no: int, selected: List[str]
 
 
 
-# FORCE_REAL_DATA_COLLECTION_PIPELINE_FIX
-def force_collect_real_data_for_targets(rc_date: str = "", targets: Optional[pd.DataFrame] = None, selected: Optional[List[str]] = None) -> Tuple[Dict[str, pd.DataFrame], pd.DataFrame]:
+
+
+# SEQUENTIAL_26API_ONE_BY_ONE_SAVE_FIX
+def _seq_state_file() -> Path:
+    d = DATA_DIR if "DATA_DIR" in globals() else Path("maru_kra_data")
+    d.mkdir(parents=True, exist_ok=True)
+    return d / "sequential_26api_state.json"
+
+def _load_seq_state() -> Dict[str, Any]:
+    try:
+        p = _seq_state_file()
+        if p.exists():
+            return json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return {}
+
+def _save_seq_state(state: Dict[str, Any]) -> None:
+    try:
+        _seq_state_file().write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+def _seq_file_dir(rc_date: str, meet: str, race_no: Any) -> Path:
+    d = (DATA_DIR if "DATA_DIR" in globals() else Path("maru_kra_data")) / "sequential_api_files" / _safe_file_key(rc_date, meet, race_no)
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+def _seq_api_keys() -> List[str]:
+    if "API_LABELS" in globals():
+        return [k for k, _ in API_LABELS]
+    return ["race_url", "entry_url", "entry_registered_url", "horse_url", "body_url", "rating_url", "today_odds_url"]
+
+def _seq_label(key: str) -> str:
+    try:
+        return dict(API_LABELS).get(key, key)
+    except Exception:
+        return key
+
+def _seq_target_id(rc_date: str, meet: str, race_no: Any) -> str:
+    return _safe_file_key(rc_date, meet, race_no)
+
+def reset_sequential_26api(rc_date: str, meet: str, race_no: Any) -> None:
+    state = _load_seq_state()
+    target = _seq_target_id(rc_date, meet, race_no)
+    state[target] = {
+        "날짜": rc_date,
+        "경마장": meet,
+        "경주번호": int(race_no) if str(race_no).isdigit() else race_no,
+        "index": 0,
+        "완료": False,
+        "저장시각": now_str() if "now_str" in globals() else str(dt.datetime.now()),
+        "rows": [],
+    }
+    _save_seq_state(state)
+
+def sequential_26api_step(rc_date: str, meet: str, race_no: Any, step_count: int = 1) -> Dict[str, Any]:
     """
-    화면 확인용 상태표만 만드는 것이 아니라, 실제 경주 대상별 API 자료를 받아와 session/live_cache/hub에 저장합니다.
-    전체 경마장 자동 모드에서는 서울/부산경남/제주 현재·다음 경주를 대상으로 수집합니다.
+    26개 API를 하나씩 순차 접속합니다.
+    1개 API 접속 → 받은 자료 즉시 CSV 저장 → 상태 저장 → 다음 실행 때 다음 API 진행.
+    전체를 한 번에 때리지 않아 느림/멈춤/과호출을 줄입니다.
+    """
+    rc_date = rc_date or (today_kst() if "today_kst" in globals() else "")
+    meet = "서울" if str(meet or "전체") == "전체" else str(meet or "서울")
+    try:
+        race_no = int(float(race_no or 1))
+        if race_no <= 0:
+            race_no = 1
+    except Exception:
+        race_no = 1
+
+    api_keys = _seq_api_keys()
+    target = _seq_target_id(rc_date, meet, race_no)
+    state = _load_seq_state()
+    item = state.get(target)
+    if not isinstance(item, dict):
+        reset_sequential_26api(rc_date, meet, race_no)
+        state = _load_seq_state()
+        item = state.get(target, {})
+
+    idx = int(item.get("index", 0) or 0)
+    rows = item.get("rows", [])
+    if idx >= len(api_keys):
+        item["완료"] = True
+        item["index"] = len(api_keys)
+        item["완료시각"] = now_str() if "now_str" in globals() else str(dt.datetime.now())
+        state[target] = item
+        _save_seq_state(state)
+        return item
+
+    max_steps = max(1, int(step_count or 1))
+    collected_data = st.session_state.get("live_data", {}) or {}
+    status_rows = []
+
+    for _ in range(max_steps):
+        if idx >= len(api_keys):
+            break
+        key = api_keys[idx]
+        label = _seq_label(key)
+        started = now_str() if "now_str" in globals() else str(dt.datetime.now())
+        try:
+            # fetch_one_api는 API 하나만 접속하므로 순차 저장에 적합
+            df, msg, used_url = fetch_one_api(key, rc_date, meet, int(race_no))
+            if df is None:
+                df = pd.DataFrame()
+            if not isinstance(df, pd.DataFrame):
+                df = pd.DataFrame(df)
+            save_dir = _seq_file_dir(rc_date, meet, race_no)
+            file_path = save_dir / f"{idx+1:02d}_{_safe_file_key(key)}_{_safe_file_key(label)}.csv"
+            df.to_csv(file_path, index=False, encoding="utf-8-sig")
+
+            if not df.empty:
+                df2 = df.copy()
+                df2["수집경마장"] = meet
+                df2["수집경주번호"] = int(race_no)
+                df2["수집API"] = key
+                collected_data[key] = df2
+
+            row = {
+                "순번": idx + 1,
+                "API": label,
+                "key": key,
+                "행수": int(len(df)),
+                "상태": msg,
+                "저장파일": str(file_path),
+                "시작": started,
+                "완료시각": now_str() if "now_str" in globals() else str(dt.datetime.now()),
+                "URL": mask_key(used_url) if "mask_key" in globals() else str(used_url)[:160],
+            }
+        except Exception as e:
+            row = {
+                "순번": idx + 1,
+                "API": label,
+                "key": key,
+                "행수": 0,
+                "상태": f"ERROR: {str(e)[:180]}",
+                "저장파일": "",
+                "시작": started,
+                "완료시각": now_str() if "now_str" in globals() else str(dt.datetime.now()),
+                "URL": "",
+            }
+
+        rows.append(row)
+        status_rows.append(row)
+        idx += 1
+
+        # 한 번에 너무 오래 붙잡지 않도록 즉시 저장
+        item.update({
+            "날짜": rc_date,
+            "경마장": meet,
+            "경주번호": int(race_no),
+            "index": idx,
+            "완료": idx >= len(api_keys),
+            "저장시각": now_str() if "now_str" in globals() else str(dt.datetime.now()),
+            "rows": rows,
+        })
+        state[target] = item
+        _save_seq_state(state)
+
+    # session/cache 저장
+    st.session_state["live_data"] = collected_data
+    st.session_state["api_status"] = pd.DataFrame(rows)
+    st.session_state["sequential_26api_state"] = item
+
+    try:
+        if collected_data:
+            save_live_cache(collected_data, pd.DataFrame(rows))
+    except Exception:
+        pass
+
+    try:
+        if "external_hub_save" in globals():
+            external_hub_save("sequential_26api_state", item)
+    except Exception:
+        pass
+
+    return item
+
+def render_sequential_26api_center(rc_date: str, meet: str, race_no: Any) -> None:
+    """26개 API 하나씩 접속→저장→다음 API 진행 센터."""
+    st.markdown("### 🔁 26개 API 순차 수집센터")
+    st.caption("한 번에 26개를 모두 호출하지 않고, 1개씩 접속해서 받은 자료를 저장한 뒤 다음 API로 넘어갑니다.")
+
+    meet_run = "서울" if str(meet or "전체") == "전체" else str(meet or "서울")
+    try:
+        race_run = int(float(race_no or 1))
+        if race_run <= 0:
+            race_run = 1
+    except Exception:
+        race_run = 1
+
+    c0, c1, c2 = st.columns([1, 1, 1])
+    with c0:
+        step_count = st.selectbox("한 번에 진행", [1, 2, 3, 5], index=0, key="seq_api_step_count")
+    with c1:
+        auto_seq = st.toggle("자동 순차 진행", value=True, key="seq_api_auto_run", help="켜두면 새로고침마다 다음 API를 1개씩 받아 저장합니다.")
+    with c2:
+        if st.button("처음부터 다시", key="seq_api_reset", width="stretch"):
+            reset_sequential_26api(rc_date, meet_run, race_run)
+            st.rerun()
+
+    state = _load_seq_state().get(_seq_target_id(rc_date, meet_run, race_run), {})
+    if auto_seq and not state.get("완료", False):
+        with st.spinner(f"{meet_run} {race_run}R API {step_count}개 순차 수집 중..."):
+            state = sequential_26api_step(rc_date, meet_run, race_run, int(step_count))
+
+    api_total = len(_seq_api_keys())
+    done = int(state.get("index", 0) or 0)
+    progress = min(1.0, done / max(1, api_total))
+    st.progress(progress, text=f"{done}/{api_total}개 완료")
+
+    rows = state.get("rows", []) if isinstance(state, dict) else []
+    ok_count = 0
+    total_rows = 0
+    for r in rows:
+        try:
+            cnt = int(r.get("행수", 0) or 0)
+            total_rows += cnt
+            if cnt > 0:
+                ok_count += 1
+        except Exception:
+            pass
+
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("완료 API", f"{done}/{api_total}")
+    m2.metric("수신 성공", ok_count)
+    m3.metric("총 수신행수", total_rows)
+    m4.metric("상태", "완료" if state.get("완료") else "진행중")
+
+    if rows:
+        df = pd.DataFrame(rows)
+        show = [c for c in ["순번", "단계", "API", "key", "행수", "상태", "추천판정", "완료시각", "저장파일"] if c in df.columns]
+        st.dataframe(df[show], use_container_width=True, hide_index=True, height=360)
+    else:
+        st.info("아직 순차 수집 기록이 없습니다. 자동 순차 진행을 켜거나 새로고침하면 1번 API부터 수집합니다.")
+
+    if state.get("완료"):
+        st.success("26개 API 순차 수집 완료")
+    else:
+        next_idx = done
+        keys = _seq_api_keys()
+        if next_idx < len(keys):
+            st.info(f"다음 수집 예정: {next_idx+1}번 · {_seq_label(keys[next_idx])}")
+
+
+# FAST_FIRST_COLLECTION_FIX
+FAST_FIRST_API_KEYS = [
+    "race_url",
+    "entry_url",
+    "entry_registered_url",
+    "horse_url",
+    "rating_url",
+    "body_url",
+    "jockey_change_url",
+    "today_odds_url",
+]
+
+def _fast_first_selected_keys(selected: Optional[List[str]] = None) -> List[str]:
+    """추천 생성에 필요한 핵심 API부터 빠르게 수집합니다."""
+    if "API_LABELS" not in globals():
+        return FAST_FIRST_API_KEYS
+    available = [k for k, _ in API_LABELS]
+    base = [k for k in FAST_FIRST_API_KEYS if k in available]
+    # 사용자가 전체 ON을 해도 첫 화면은 핵심만 먼저 수집
+    return base or available[:8]
+
+def _full_selected_keys(selected: Optional[List[str]] = None) -> List[str]:
+    if selected:
+        return selected
+    if "API_LABELS" in globals():
+        return [k for k, _ in API_LABELS]
+    return FAST_FIRST_API_KEYS
+
+def force_collect_real_data_for_targets(rc_date: str = "", targets: Optional[pd.DataFrame] = None, selected: Optional[List[str]] = None, fast_first: bool = True) -> Tuple[Dict[str, pd.DataFrame], pd.DataFrame]:
+    """
+    빠른 수집판.
+    기존처럼 전체 경마장 × 여러 경주 × 26개 API를 한 번에 치면 너무 오래 걸리므로,
+    먼저 추천에 필요한 핵심 API만 수집합니다.
+    전체 26개 상세는 API/엑셀 탭에서 별도 확인합니다.
     """
     rc_date = rc_date or (today_kst() if "today_kst" in globals() else (now_kst().strftime("%Y%m%d") if "now_kst" in globals() else ""))
-    selected = selected or ([k for k, _ in API_LABELS] if "API_LABELS" in globals() else [])
+    selected_fast = _fast_first_selected_keys(selected) if fast_first else _full_selected_keys(selected)
     all_data: Dict[str, pd.DataFrame] = {}
     all_status_rows: List[Dict[str, Any]] = []
 
     if targets is None or not isinstance(targets, pd.DataFrame) or targets.empty:
-        rows = []
         try:
             sched, _log = load_all_meet_schedule_for_monitor(rc_date) if "load_all_meet_schedule_for_monitor" in globals() else (pd.DataFrame(), pd.DataFrame())
             targets = _current_or_next_races(sched, per_meet=1) if "_current_or_next_races" in globals() else pd.DataFrame()
         except Exception:
             targets = pd.DataFrame()
-        if targets is None or targets.empty:
-            targets = pd.DataFrame([
-                {"경마장": "서울", "경주번호": 1},
-                {"경마장": "부산경남", "경주번호": 1},
-                {"경마장": "제주", "경주번호": 1},
-            ])
 
+    if targets is None or targets.empty:
+        targets = pd.DataFrame([
+            {"경마장": "서울", "경주번호": 1},
+            {"경마장": "부산경남", "경주번호": 1},
+            {"경마장": "제주", "경주번호": 1},
+        ])
+
+    # 오래 걸리지 않도록 경마장별 현재/다음 1경주만 먼저 수집
+    try:
+        targets = targets.groupby("경마장", dropna=False).head(1).reset_index(drop=True)
+    except Exception:
+        targets = targets.head(3)
+
+    start_ts = pd.Timestamp.now()
     for _, row in targets.iterrows():
         meet = str(row.get("경마장", "서울") or "서울")
         if meet == "전체":
@@ -6815,14 +7098,13 @@ def force_collect_real_data_for_targets(rc_date: str = "", targets: Optional[pd.
             race_no = 1
 
         try:
-            data, status = fetch_all_live(rc_date, meet, race_no, selected)
+            data, status = fetch_all_live(rc_date, meet, race_no, selected_fast)
         except Exception as e:
             data, status = {}, pd.DataFrame([{
                 "API": "전체", "key": "ALL", "행수": 0,
-                "상태": f"수집 실패: {str(e)[:160]}", "URL": ""
+                "상태": f"빠른수집 실패: {str(e)[:160]}", "URL": ""
             }])
 
-        # key 충돌 방지를 위해 경마장/경주번호 suffix로 별도 보관 + 기본키에도 첫 수신자료 유지
         if isinstance(data, dict):
             for k, df in data.items():
                 try:
@@ -6845,6 +7127,7 @@ def force_collect_real_data_for_targets(rc_date: str = "", targets: Optional[pd.
             st_df = status.copy()
             st_df["수집경마장"] = meet
             st_df["수집경주번호"] = race_no
+            st_df["수집방식"] = "빠른핵심수집" if fast_first else "전체수집"
             all_status_rows.extend(st_df.to_dict("records"))
 
     all_status = pd.DataFrame(all_status_rows)
@@ -6852,25 +7135,30 @@ def force_collect_real_data_for_targets(rc_date: str = "", targets: Optional[pd.
     st.session_state["api_status"] = all_status
     st.session_state["real_collection_done"] = True
     st.session_state["real_collection_at"] = now_str() if "now_str" in globals() else str(dt.datetime.now())
+    st.session_state["real_collection_mode"] = "빠른핵심수집" if fast_first else "전체수집"
+    try:
+        st.session_state["real_collection_seconds"] = round((pd.Timestamp.now() - start_ts).total_seconds(), 1)
+    except Exception:
+        pass
 
     try:
         if all_data:
             save_live_cache(all_data, all_status)
     except Exception:
         pass
-
     try:
         if "save_api_received_files" in globals():
             save_api_received_files(all_data, all_status, rc_date, "전체", "multi")
     except Exception:
         pass
-
     try:
         if "external_hub_save" in globals():
             summary = {
                 "저장시각": st.session_state.get("real_collection_at"),
                 "날짜": rc_date,
                 "대상": "전체경마장 현재/다음경주",
+                "수집방식": st.session_state.get("real_collection_mode"),
+                "소요초": st.session_state.get("real_collection_seconds"),
                 "API상태행수": len(all_status) if isinstance(all_status, pd.DataFrame) else 0,
                 "데이터묶음수": len(all_data),
                 "총데이터행수": int(sum(len(v) for v in all_data.values() if hasattr(v, "__len__"))),
@@ -6882,33 +7170,36 @@ def force_collect_real_data_for_targets(rc_date: str = "", targets: Optional[pd.
     return all_data, all_status
 
 def render_force_real_collection_center(rc_date: str, selected: List[str], targets: Optional[pd.DataFrame] = None) -> None:
-    """실제로 자료를 받아왔는지 바로 보여주는 센터."""
     st.markdown("### 📥 실제 자료 수집센터")
-    st.caption("상태 확인만 하지 않고, 선택된 경마장/현재·다음 경주의 API 자료를 실제로 받아와 저장합니다.")
+    st.caption("첫 화면은 빠른 핵심 API만 먼저 수집합니다. 전체 26개는 상세 확인 때 호출합니다.")
 
-    auto_key = f"force_real_collect_once_{rc_date}_{now_kst().strftime('%H%M') if 'now_kst' in globals() else 'now'}"
+    auto_key = f"force_real_collect_fast_once_{rc_date}_{now_kst().strftime('%H%M') if 'now_kst' in globals() else 'now'}"
     if not st.session_state.get(auto_key):
-        with st.spinner("공식 API 자료 실제 수집 중..."):
-            data, status = force_collect_real_data_for_targets(rc_date, targets, selected)
+        with st.spinner("핵심 API 빠른 수집 중... 보통 10~25초"):
+            data, status = force_collect_real_data_for_targets(rc_date, targets, selected, fast_first=True)
             st.session_state[auto_key] = True
     else:
         data = st.session_state.get("live_data", {}) or {}
         status = st.session_state.get("api_status", pd.DataFrame())
 
     total_rows = int(sum(len(v) for v in data.values() if hasattr(v, "__len__"))) if isinstance(data, dict) else 0
-    c1, c2, c3 = st.columns(3)
-    c1.metric("데이터 묶음", len(data) if isinstance(data, dict) else 0)
-    c2.metric("총 수신행수", total_rows)
-    c3.metric("상태표", len(status) if isinstance(status, pd.DataFrame) else 0)
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("수집방식", st.session_state.get("real_collection_mode", "빠른핵심"))
+    c2.metric("소요", f"{st.session_state.get('real_collection_seconds', '-') }초")
+    c3.metric("총 수신행수", total_rows)
+    c4.metric("상태표", len(status) if isinstance(status, pd.DataFrame) else 0)
 
     if total_rows > 0:
-        st.success(f"자료 수집 완료 · 총 {total_rows:,}행")
+        st.success(f"핵심 자료 수집 완료 · 총 {total_rows:,}행")
     else:
         st.error("실제 수신자료가 0행입니다. 아래 API 상태표의 키/승인/URL/0건 메시지를 확인하세요.")
 
+    with st.expander("왜 전체 26개를 한 번에 안 부르나요?", expanded=False):
+        st.info("전체 경마장 3곳 × 현재/다음 경주 × 26개 API를 한 번에 호출하면 60~180초까지 걸릴 수 있습니다. 그래서 추천에 필요한 경주정보/출전표/말정보/체중/레이팅/기수변경/배당 핵심 API부터 먼저 수집합니다.")
+
     if isinstance(status, pd.DataFrame) and not status.empty:
-        keep = [c for c in ["수집경마장", "수집경주번호", "API", "key", "행수", "상태", "URL"] if c in status.columns]
-        st.dataframe(status[keep] if keep else status, use_container_width=True, hide_index=True, height=360)
+        keep = [c for c in ["수집경마장", "수집경주번호", "API", "key", "행수", "상태", "수집방식", "URL"] if c in status.columns]
+        st.dataframe(status[keep] if keep else status, use_container_width=True, hide_index=True, height=320)
 
     if isinstance(data, dict) and data:
         with st.expander("받아온 자료 바로보기", expanded=True):
@@ -6920,10 +7211,10 @@ def render_force_real_collection_center(rc_date: str, selected: List[str], targe
                     if df.empty:
                         continue
                     st.markdown(f"**{k} · {len(df)}행**")
-                    st.dataframe(df.head(80), use_container_width=True, hide_index=True, height=240)
+                    st.dataframe(df.head(60), use_container_width=True, hide_index=True, height=220)
                     shown += 1
-                    if shown >= 6:
-                        st.caption("화면 속도 때문에 상위 6개 자료만 먼저 표시합니다. 전체는 엑셀 상세자료에서 확인하세요.")
+                    if shown >= 5:
+                        st.caption("화면 속도 때문에 상위 5개 자료만 먼저 표시합니다. 전체는 엑셀 상세자료에서 확인하세요.")
                         break
                 except Exception:
                     continue
@@ -7204,6 +7495,359 @@ def _final_clean_mobile_url() -> str:
     """모바일 전용 버튼은 항상 현재 final-clean 앱의 ?mode=mobile로 이동합니다."""
     return "https://maru-kra-final-clean.streamlit.app/?mode=mobile"
 
+
+
+
+# RESULT_PRIORITY_26API_RECOMMEND_EACH_RACE_FIX
+# 26개 API 순차 수집을 "추천/결과 정확도" 우선순위로 재정렬합니다.
+# 핵심: 경주 전 추천자료 → 실시간 변수자료 → 배당/인기 → 경주 직후 결과 → 확정배당/학습 순서
+RESULT_PRIORITY_26API_KEYS = [
+    # A. 경주 전, 추천 생성에 반드시 필요한 기본자료
+    "race_url",
+    "race_overview_url",
+    "entry_url",
+    "entry_registered_url",
+    "horse_url",
+    "jockey_result_url",
+    "rating_url",
+
+    # B. 경주 직전 변수자료
+    "body_url",
+    "gear_url",
+    "horse_shoe_url",
+    "jockey_change_url",
+    "weather_alert_url",
+    "corner_pace_url",
+
+    # C. 구매 직전 배당/인기
+    "popularity_url",
+    "odds_url",
+    "today_odds_url",
+    "first_odds_url",
+    "second_odds_url",
+    "third_odds_url",
+    "dividend_integrated_url",
+
+    # D. 경주 직후 결과/확정/취소
+    "race_cancel_url",
+    "result_detail_url",
+    "race_detail_result_url",
+
+    # E. 보조 기록성 자료
+    "race_record_url",
+    "start_exam_url",
+    "judge_url",
+]
+
+def _seq_api_keys() -> List[str]:
+    """
+    순차수집 순서.
+    API_LABELS에 실제 등록된 26개만 골라서 추천/결과 정확도 우선순위로 가져옵니다.
+    위 우선순위에 없는 보조 API가 있으면 마지막에 원래 등록순서로 붙입니다.
+    """
+    if "API_LABELS" in globals():
+        available = [k for k, _ in API_LABELS]
+    else:
+        available = RESULT_PRIORITY_26API_KEYS
+    ordered = [k for k in RESULT_PRIORITY_26API_KEYS if k in available]
+    tail = [k for k in available if k not in ordered]
+    return ordered + tail
+
+def _api_stage_name(key: str) -> str:
+    if key in ["race_url", "race_overview_url", "entry_url", "entry_registered_url", "horse_url", "jockey_result_url", "rating_url"]:
+        return "경주전_기본추천"
+    if key in ["body_url", "gear_url", "horse_shoe_url", "jockey_change_url", "weather_alert_url", "corner_pace_url"]:
+        return "경주전_변수점검"
+    if key in ["popularity_url", "odds_url", "today_odds_url", "first_odds_url", "second_odds_url", "third_odds_url", "dividend_integrated_url"]:
+        return "구매전_배당인기"
+    if key in ["race_cancel_url", "result_detail_url", "race_detail_result_url"]:
+        return "경주후_결과확정"
+    return "보조자료"
+
+def _recommend_ready_from_data(data: Dict[str, pd.DataFrame]) -> Tuple[bool, str]:
+    """추천 가능한 최소자료 확인: 경주/출전표/말정보 중 핵심 행수."""
+    try:
+        entry_rows = 0
+        for k in ["entry_url", "entry_registered_url"]:
+            if k in data and hasattr(data[k], "__len__"):
+                entry_rows = max(entry_rows, len(data[k]))
+        race_rows = 0
+        for k in ["race_url", "race_overview_url"]:
+            if k in data and hasattr(data[k], "__len__"):
+                race_rows = max(race_rows, len(data[k]))
+        horse_rows = len(data.get("horse_url", pd.DataFrame())) if hasattr(data.get("horse_url", pd.DataFrame()), "__len__") else 0
+        if entry_rows >= 3:
+            return True, f"추천가능: 출전표 {entry_rows}행 / 경주 {race_rows}행 / 말정보 {horse_rows}행"
+        return False, f"추천대기: 출전표 {entry_rows}행이라 3두 미만"
+    except Exception as e:
+        return False, f"추천가능 확인 실패: {str(e)[:80]}"
+
+def build_recommendation_after_each_race(rc_date: str, meet: str, race_no: Any, data: Optional[Dict[str, pd.DataFrame]] = None) -> Dict[str, Any]:
+    """
+    매 경기 자료 수집 후 즉시 추천을 생성/저장합니다.
+    실패해도 앱 전체를 멈추지 않고 원인만 남깁니다.
+    """
+    data = data or st.session_state.get("live_data", {}) or {}
+    try:
+        ready, reason = _recommend_ready_from_data(data)
+        if not ready:
+            payload = {
+                "날짜": rc_date,
+                "경마장": meet,
+                "경주번호": int(race_no) if str(race_no).isdigit() else race_no,
+                "상태": reason,
+                "추천가능": "N",
+                "저장시각": now_str() if "now_str" in globals() else str(dt.datetime.now()),
+            }
+            try:
+                if "external_hub_save" in globals():
+                    external_hub_save("race_recommend_status", payload)
+            except Exception:
+                pass
+            return payload
+
+        env = fetch_weather(meet) if "fetch_weather" in globals() else {}
+        base = build_base_horses(data, rc_date, meet, int(race_no)) if "build_base_horses" in globals() else pd.DataFrame()
+        horses = merge_score_features(base, data, rc_date, meet, int(race_no)) if "merge_score_features" in globals() else base
+        sim_count = int(st.session_state.get("sim_count", 1200))
+        risk_mode = st.session_state.get("risk_mode", "균형형")
+        score_df, result, combos = score_and_recommend(horses, env, sim_count, risk_mode) if "score_and_recommend" in globals() else (pd.DataFrame(), {}, [])
+
+        if not isinstance(result, dict):
+            result = {}
+        result.update({
+            "날짜": rc_date,
+            "경마장": meet,
+            "경주번호": int(race_no),
+            "추천가능": "Y",
+            "상태": "매경기 자료수집 후 추천 생성",
+            "추천사유": reason,
+            "저장시각": now_str() if "now_str" in globals() else str(dt.datetime.now()),
+        })
+
+        try:
+            if "_build_three_type_recommendation" in globals():
+                result = _build_three_type_recommendation(result)
+        except Exception:
+            pass
+
+        try:
+            if "save_mobile_recommend_json" in globals():
+                save_mobile_recommend_json(result)
+        except Exception:
+            pass
+        try:
+            if "external_hub_save" in globals():
+                external_hub_save("race_recommend_status", result)
+                external_hub_save("mobile_recommend", result)
+        except Exception:
+            pass
+        try:
+            st.session_state["latest_each_race_recommend"] = result
+            st.session_state["latest_each_race_score"] = score_df
+            st.session_state["latest_each_race_combos"] = combos
+        except Exception:
+            pass
+        return result
+    except Exception as e:
+        payload = {
+            "날짜": rc_date,
+            "경마장": meet,
+            "경주번호": race_no,
+            "추천가능": "N",
+            "상태": f"추천 생성 오류: {str(e)[:160]}",
+            "저장시각": now_str() if "now_str" in globals() else str(dt.datetime.now()),
+        }
+        try:
+            if "external_hub_save" in globals():
+                external_hub_save("race_recommend_status", payload)
+        except Exception:
+            pass
+        return payload
+
+def sequential_26api_step(rc_date: str, meet: str, race_no: Any, step_count: int = 1) -> Dict[str, Any]:
+    """
+    결과/추천 정확도 우선순위 26개 API 순차수집.
+    1개 API 완료 즉시 저장하고, 추천 가능한 최소자료가 모이면 매 경기 추천을 즉시 생성합니다.
+    """
+    rc_date = rc_date or (today_kst() if "today_kst" in globals() else "")
+    meet = "서울" if str(meet or "전체") == "전체" else str(meet or "서울")
+    try:
+        race_no = int(float(race_no or 1))
+        if race_no <= 0:
+            race_no = 1
+    except Exception:
+        race_no = 1
+
+    api_keys = _seq_api_keys()
+    target = _seq_target_id(rc_date, meet, race_no) if "_seq_target_id" in globals() else _safe_file_key(rc_date, meet, race_no)
+    state = _load_seq_state() if "_load_seq_state" in globals() else {}
+    item = state.get(target)
+    if not isinstance(item, dict):
+        reset_sequential_26api(rc_date, meet, race_no)
+        state = _load_seq_state()
+        item = state.get(target, {})
+
+    idx = int(item.get("index", 0) or 0)
+    rows = item.get("rows", [])
+    if idx >= len(api_keys):
+        item["완료"] = True
+        item["index"] = len(api_keys)
+        item["완료시각"] = now_str() if "now_str" in globals() else str(dt.datetime.now())
+        state[target] = item
+        _save_seq_state(state)
+        return item
+
+    max_steps = max(1, int(step_count or 1))
+    collected_data = st.session_state.get("live_data", {}) or {}
+
+    for _ in range(max_steps):
+        if idx >= len(api_keys):
+            break
+        key = api_keys[idx]
+        label = _seq_label(key) if "_seq_label" in globals() else key
+        stage = _api_stage_name(key)
+        started = now_str() if "now_str" in globals() else str(dt.datetime.now())
+        try:
+            df, msg, used_url = fetch_one_api(key, rc_date, meet, int(race_no))
+            if df is None:
+                df = pd.DataFrame()
+            if not isinstance(df, pd.DataFrame):
+                df = pd.DataFrame(df)
+
+            save_dir = _seq_file_dir(rc_date, meet, race_no) if "_seq_file_dir" in globals() else (DATA_DIR / "sequential_api_files")
+            save_dir.mkdir(parents=True, exist_ok=True)
+            file_path = save_dir / f"{idx+1:02d}_{_safe_file_key(stage)}_{_safe_file_key(key)}_{_safe_file_key(label)}.csv"
+            df.to_csv(file_path, index=False, encoding="utf-8-sig")
+
+            if not df.empty:
+                df2 = df.copy()
+                df2["수집경마장"] = meet
+                df2["수집경주번호"] = int(race_no)
+                df2["수집API"] = key
+                df2["수집단계"] = stage
+                collected_data[key] = df2
+
+            ready, ready_reason = _recommend_ready_from_data(collected_data)
+            row = {
+                "순번": idx + 1,
+                "단계": stage,
+                "API": label,
+                "key": key,
+                "행수": int(len(df)),
+                "상태": msg,
+                "추천판정": ready_reason,
+                "저장파일": str(file_path),
+                "시작": started,
+                "완료시각": now_str() if "now_str" in globals() else str(dt.datetime.now()),
+                "URL": mask_key(used_url) if "mask_key" in globals() else str(used_url)[:160],
+            }
+        except Exception as e:
+            row = {
+                "순번": idx + 1,
+                "단계": stage,
+                "API": label,
+                "key": key,
+                "행수": 0,
+                "상태": f"ERROR: {str(e)[:180]}",
+                "추천판정": "오류로 추천판정 불가",
+                "저장파일": "",
+                "시작": started,
+                "완료시각": now_str() if "now_str" in globals() else str(dt.datetime.now()),
+                "URL": "",
+            }
+
+        rows.append(row)
+        idx += 1
+
+        # 하나 끝날 때마다 즉시 저장
+        item.update({
+            "날짜": rc_date,
+            "경마장": meet,
+            "경주번호": int(race_no),
+            "index": idx,
+            "완료": idx >= len(api_keys),
+            "저장시각": now_str() if "now_str" in globals() else str(dt.datetime.now()),
+            "rows": rows,
+            "순서방식": "결과정확도_추천우선",
+        })
+        state[target] = item
+        _save_seq_state(state)
+
+        st.session_state["live_data"] = collected_data
+        st.session_state["api_status"] = pd.DataFrame(rows)
+        try:
+            if collected_data:
+                save_live_cache(collected_data, pd.DataFrame(rows))
+        except Exception:
+            pass
+
+        # 추천 가능한 최소 자료가 모이면 매 경기 추천 생성
+        try:
+            ready, _reason = _recommend_ready_from_data(collected_data)
+            if ready:
+                rec = build_recommendation_after_each_race(rc_date, meet, int(race_no), collected_data)
+                item["최근추천"] = rec
+                state[target] = item
+                _save_seq_state(state)
+        except Exception:
+            pass
+
+    try:
+        if "external_hub_save" in globals():
+            external_hub_save("sequential_26api_state", item)
+    except Exception:
+        pass
+
+    return item
+
+def render_recommendation_after_each_race_center(rc_date: str, meet: str, race_no: Any) -> None:
+    st.markdown("### 🎯 매 경기 추천 생성 상태")
+    rec = st.session_state.get("latest_each_race_recommend", {})
+    if not isinstance(rec, dict) or not rec:
+        rec = build_recommendation_after_each_race(rc_date, "서울" if str(meet) == "전체" else meet, 1 if int(race_no or 0) <= 0 else int(race_no), st.session_state.get("live_data", {}))
+    if rec.get("추천가능") == "Y":
+        st.success(f"{rec.get('경마장')} {rec.get('경주번호')}R 추천 생성 완료")
+    else:
+        st.warning(rec.get("상태", "추천 대기"))
+    keys = ["안정형대표", "변수형대표", "고배당형대표", "공격삼쌍승", "방어삼복승", "예상배당", "신뢰도", "추천사유"]
+    rows = [{"항목": k, "값": rec.get(k, "")} for k in keys if rec.get(k, "") != ""]
+    if rows:
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+
+
+
+
+# FILE_AND_RUNTIME_CHECK_CENTER_FIX
+def render_file_and_runtime_check_center() -> None:
+    st.markdown("### 🧪 파일 검사 / 오류 검사")
+    checks = []
+    try:
+        checks.append({"검사": "Python 실행", "상태": "OK", "내용": sys.version.split()[0] if "sys" in globals() else "-"})
+    except Exception as e:
+        checks.append({"검사": "Python 실행", "상태": "FAIL", "내용": str(e)[:120]})
+    try:
+        checks.append({"검사": "26개 API 순서", "상태": "OK" if len(_seq_api_keys()) >= 20 else "WARN", "내용": f"{len(_seq_api_keys())}개"})
+    except Exception as e:
+        checks.append({"검사": "26개 API 순서", "상태": "FAIL", "내용": str(e)[:120]})
+    try:
+        checks.append({"검사": "API Key", "상태": "OK" if get_api_key() else "FAIL", "내용": get_api_key_source() if get_api_key() else "키 없음"})
+    except Exception as e:
+        checks.append({"검사": "API Key", "상태": "FAIL", "내용": str(e)[:120]})
+    try:
+        p = _seq_state_file()
+        checks.append({"검사": "순차상태파일", "상태": "OK", "내용": str(p)})
+    except Exception as e:
+        checks.append({"검사": "순차상태파일", "상태": "FAIL", "내용": str(e)[:120]})
+    try:
+        d = DATA_DIR if "DATA_DIR" in globals() else Path("maru_kra_data")
+        checks.append({"검사": "데이터폴더", "상태": "OK" if d.exists() else "WARN", "내용": str(d)})
+    except Exception as e:
+        checks.append({"검사": "데이터폴더", "상태": "FAIL", "내용": str(e)[:120]})
+    st.dataframe(pd.DataFrame(checks), use_container_width=True, hide_index=True)
+
+
 def render() -> None:
     # PC 기본 화면은 기존 그대로 유지합니다.
     # 휴대폰 접속은 URL 파라미터가 없어도 자동으로 모바일 10초 구매 화면으로 분리합니다.
@@ -7293,7 +7937,8 @@ def render() -> None:
         st.session_state["meet"] = meet
         st.session_state["race_no"] = race_no
         st.session_state["selected_api_keys"] = selected
-        st.caption(f"이번 수집 대상: {len(selected)}/26개 · 모드: {collection_mode}")  # IMMEDIATE_API_SESSION_KEYS_APPLY
+        st.caption(f"이번 수집 대상: {len(selected)}/26개 · 모드: {collection_mode}")
+        st.caption("첫 화면은 빠른 핵심 API 우선 수집 · 전체 26개는 상세/엑셀 확인에서 순차 점검")  # FAST_FIRST_SIDEBAR_NOTICE_APPLY  # IMMEDIATE_API_SESSION_KEYS_APPLY
         if collection_mode == "허브만 분석":
             st.error("현재 허브만 분석 모드입니다. 이 모드는 공식 API를 호출하지 않습니다. 실전 추천을 받으려면 실시간 API 우선 + 허브 보조로 바꾸세요.")  # HUB_ONLY_MODE_WARNING_APPLY
         if collection_mode == "스마트 자동":
@@ -7342,6 +7987,9 @@ def render() -> None:
         st.success("✅ API URL 26개 자동 탑재 완료: 재입력 없이 호출/ON-OFF만 사용")
         st.info("결과/배당 계열 일부 API는 경주시간 전이면 대기 상태가 정상입니다. 하지만 상태표는 즉시 표시됩니다.")
         render_api_hub_panel(status2, data3)
+        render_sequential_26api_center(rc_date, "서울" if str(meet) == "전체" else meet, 1 if int(race_no or 0) <= 0 else int(race_no))  # SEQUENTIAL_26API_TAB_APPLY
+        render_recommendation_after_each_race_center(rc_date, "서울" if str(meet) == "전체" else meet, 1 if int(race_no or 0) <= 0 else int(race_no))  # EACH_RACE_RECOMMEND_CENTER_TAB_APPLY
+        render_file_and_runtime_check_center()  # FILE_RUNTIME_CHECK_TAB_APPLY
     with tab4:
         if st.session_state.get("race_scope") == "전체 경마장 자동":
             render_all_meet_all_race_monitor(rc_date, selected, int(sim_count), risk_mode)
