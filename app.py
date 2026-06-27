@@ -4184,6 +4184,7 @@ def _current_or_next_races(sched: pd.DataFrame, per_meet: int = 3) -> pd.DataFra
 def render_all_meet_all_race_monitor(rc_date: str, selected: List[str], sim_count: int, risk_mode: str) -> None:
     """서울 1R 고정 대신 모든 경마장/모든 경주일정을 확인하는 전체 관제 화면."""
     st.markdown("### 🌐 전체 경마장 · 전체 경주일정 관제")
+    st.info("시간락은 결과/배당 대기 API 과호출 방지용입니다. 경주정보·출전표·말정보 기본 API는 즉시 점검합니다.")  # TIME_LOCK_EXPLANATION_APPLY
     st.caption("서울/부산경남/제주 경주일정을 모두 확인하고, 현재 수집창에 들어온 경주를 자동 점검합니다.")
 
     sched, log_df = load_all_meet_schedule_for_monitor(rc_date)
@@ -4212,6 +4213,8 @@ def render_all_meet_all_race_monitor(rc_date: str, selected: List[str], sim_coun
     st.markdown("#### 현재/다음 점검 대상")
     show_cols = [c for c in ["경마장", "경주번호", "경주시간", "상태"] if c in targets.columns]
     st.dataframe(targets[show_cols], use_container_width=True, hide_index=True, height=260)
+
+    render_force_real_collection_center(rc_date, selected, targets)  # FORCE_REAL_COLLECTION_CENTER_ALL_MEET_APPLY
 
     st.markdown("#### 경마장별 첫 대상 자동 API 점검")
     result_rows = []
@@ -6773,14 +6776,254 @@ def render_live_panel(rc_date: str, meet: str, race_no: int, selected: List[str]
     return score_df, result, combos, data, status, env
 
 
+
+
+# FORCE_REAL_DATA_COLLECTION_PIPELINE_FIX
+def force_collect_real_data_for_targets(rc_date: str = "", targets: Optional[pd.DataFrame] = None, selected: Optional[List[str]] = None) -> Tuple[Dict[str, pd.DataFrame], pd.DataFrame]:
+    """
+    화면 확인용 상태표만 만드는 것이 아니라, 실제 경주 대상별 API 자료를 받아와 session/live_cache/hub에 저장합니다.
+    전체 경마장 자동 모드에서는 서울/부산경남/제주 현재·다음 경주를 대상으로 수집합니다.
+    """
+    rc_date = rc_date or (today_kst() if "today_kst" in globals() else (now_kst().strftime("%Y%m%d") if "now_kst" in globals() else ""))
+    selected = selected or ([k for k, _ in API_LABELS] if "API_LABELS" in globals() else [])
+    all_data: Dict[str, pd.DataFrame] = {}
+    all_status_rows: List[Dict[str, Any]] = []
+
+    if targets is None or not isinstance(targets, pd.DataFrame) or targets.empty:
+        rows = []
+        try:
+            sched, _log = load_all_meet_schedule_for_monitor(rc_date) if "load_all_meet_schedule_for_monitor" in globals() else (pd.DataFrame(), pd.DataFrame())
+            targets = _current_or_next_races(sched, per_meet=1) if "_current_or_next_races" in globals() else pd.DataFrame()
+        except Exception:
+            targets = pd.DataFrame()
+        if targets is None or targets.empty:
+            targets = pd.DataFrame([
+                {"경마장": "서울", "경주번호": 1},
+                {"경마장": "부산경남", "경주번호": 1},
+                {"경마장": "제주", "경주번호": 1},
+            ])
+
+    for _, row in targets.iterrows():
+        meet = str(row.get("경마장", "서울") or "서울")
+        if meet == "전체":
+            meet = "서울"
+        try:
+            race_no = int(float(row.get("경주번호", 1) or 1))
+            if race_no <= 0:
+                race_no = 1
+        except Exception:
+            race_no = 1
+
+        try:
+            data, status = fetch_all_live(rc_date, meet, race_no, selected)
+        except Exception as e:
+            data, status = {}, pd.DataFrame([{
+                "API": "전체", "key": "ALL", "행수": 0,
+                "상태": f"수집 실패: {str(e)[:160]}", "URL": ""
+            }])
+
+        # key 충돌 방지를 위해 경마장/경주번호 suffix로 별도 보관 + 기본키에도 첫 수신자료 유지
+        if isinstance(data, dict):
+            for k, df in data.items():
+                try:
+                    if df is None:
+                        continue
+                    if not isinstance(df, pd.DataFrame):
+                        df = pd.DataFrame(df)
+                    if df.empty:
+                        continue
+                    df = df.copy()
+                    df["수집경마장"] = meet
+                    df["수집경주번호"] = race_no
+                    all_data[f"{meet}_{race_no}R_{k}"] = df
+                    if k not in all_data:
+                        all_data[k] = df
+                except Exception:
+                    continue
+
+        if isinstance(status, pd.DataFrame) and not status.empty:
+            st_df = status.copy()
+            st_df["수집경마장"] = meet
+            st_df["수집경주번호"] = race_no
+            all_status_rows.extend(st_df.to_dict("records"))
+
+    all_status = pd.DataFrame(all_status_rows)
+    st.session_state["live_data"] = all_data
+    st.session_state["api_status"] = all_status
+    st.session_state["real_collection_done"] = True
+    st.session_state["real_collection_at"] = now_str() if "now_str" in globals() else str(dt.datetime.now())
+
+    try:
+        if all_data:
+            save_live_cache(all_data, all_status)
+    except Exception:
+        pass
+
+    try:
+        if "save_api_received_files" in globals():
+            save_api_received_files(all_data, all_status, rc_date, "전체", "multi")
+    except Exception:
+        pass
+
+    try:
+        if "external_hub_save" in globals():
+            summary = {
+                "저장시각": st.session_state.get("real_collection_at"),
+                "날짜": rc_date,
+                "대상": "전체경마장 현재/다음경주",
+                "API상태행수": len(all_status) if isinstance(all_status, pd.DataFrame) else 0,
+                "데이터묶음수": len(all_data),
+                "총데이터행수": int(sum(len(v) for v in all_data.values() if hasattr(v, "__len__"))),
+            }
+            external_hub_save("real_collection_summary", summary)
+    except Exception:
+        pass
+
+    return all_data, all_status
+
+def render_force_real_collection_center(rc_date: str, selected: List[str], targets: Optional[pd.DataFrame] = None) -> None:
+    """실제로 자료를 받아왔는지 바로 보여주는 센터."""
+    st.markdown("### 📥 실제 자료 수집센터")
+    st.caption("상태 확인만 하지 않고, 선택된 경마장/현재·다음 경주의 API 자료를 실제로 받아와 저장합니다.")
+
+    auto_key = f"force_real_collect_once_{rc_date}_{now_kst().strftime('%H%M') if 'now_kst' in globals() else 'now'}"
+    if not st.session_state.get(auto_key):
+        with st.spinner("공식 API 자료 실제 수집 중..."):
+            data, status = force_collect_real_data_for_targets(rc_date, targets, selected)
+            st.session_state[auto_key] = True
+    else:
+        data = st.session_state.get("live_data", {}) or {}
+        status = st.session_state.get("api_status", pd.DataFrame())
+
+    total_rows = int(sum(len(v) for v in data.values() if hasattr(v, "__len__"))) if isinstance(data, dict) else 0
+    c1, c2, c3 = st.columns(3)
+    c1.metric("데이터 묶음", len(data) if isinstance(data, dict) else 0)
+    c2.metric("총 수신행수", total_rows)
+    c3.metric("상태표", len(status) if isinstance(status, pd.DataFrame) else 0)
+
+    if total_rows > 0:
+        st.success(f"자료 수집 완료 · 총 {total_rows:,}행")
+    else:
+        st.error("실제 수신자료가 0행입니다. 아래 API 상태표의 키/승인/URL/0건 메시지를 확인하세요.")
+
+    if isinstance(status, pd.DataFrame) and not status.empty:
+        keep = [c for c in ["수집경마장", "수집경주번호", "API", "key", "행수", "상태", "URL"] if c in status.columns]
+        st.dataframe(status[keep] if keep else status, use_container_width=True, hide_index=True, height=360)
+
+    if isinstance(data, dict) and data:
+        with st.expander("받아온 자료 바로보기", expanded=True):
+            shown = 0
+            for k, df in data.items():
+                try:
+                    if not isinstance(df, pd.DataFrame):
+                        df = pd.DataFrame(df)
+                    if df.empty:
+                        continue
+                    st.markdown(f"**{k} · {len(df)}행**")
+                    st.dataframe(df.head(80), use_container_width=True, hide_index=True, height=240)
+                    shown += 1
+                    if shown >= 6:
+                        st.caption("화면 속도 때문에 상위 6개 자료만 먼저 표시합니다. 전체는 엑셀 상세자료에서 확인하세요.")
+                        break
+                except Exception:
+                    continue
+
+
+# IMMEDIATE_API_STATUS_FORCE_FIX
+def immediate_api_status_probe(rc_date: str = "", meet: str = "서울", race_no: Any = 1, selected: Optional[List[str]] = None) -> Tuple[Dict[str, pd.DataFrame], pd.DataFrame]:
+    """
+    '아직 API 호출 전입니다'가 계속 뜨는 문제 방지용.
+    화면이 열리면 최소 1회는 즉시 26개 API 상태표를 만들고 session_state에 저장합니다.
+    결과/배당처럼 시간대 제한이 필요한 API는 상태표에 대기 사유를 남기고,
+    경주정보/출전표/말정보 등 기본 API는 즉시 호출합니다.
+    """
+    try:
+        rc_date = rc_date or (today_kst() if "today_kst" in globals() else now_kst().strftime("%Y%m%d"))
+    except Exception:
+        rc_date = ""
+    meet = "서울" if str(meet or "전체") == "전체" else str(meet or "서울")
+    try:
+        race_no = int(float(race_no or 1))
+        if race_no <= 0:
+            race_no = 1
+    except Exception:
+        race_no = 1
+
+    if selected is None or not selected:
+        selected = [k for k, _ in API_LABELS] if "API_LABELS" in globals() else []
+
+    # 이미 상태표가 있으면 그대로 반환
+    data0 = st.session_state.get("live_data", {}) or {}
+    status0 = st.session_state.get("api_status", pd.DataFrame())
+    if isinstance(status0, pd.DataFrame) and not status0.empty:
+        return data0, status0
+
+    try:
+        if "get_api_key" in globals() and not get_api_key():
+            status = pd.DataFrame([{
+                "API": "전체",
+                "key": "ALL",
+                "행수": 0,
+                "상태": "API_KEY 없음 · Streamlit Secrets 또는 PC 저장키 확인",
+                "URL": "",
+            }])
+            st.session_state["live_data"] = {}
+            st.session_state["api_status"] = status
+            return {}, status
+    except Exception:
+        pass
+
+    try:
+        data, status = fetch_all_live(rc_date, meet, race_no, selected)
+        if not isinstance(status, pd.DataFrame) or status.empty:
+            status = pd.DataFrame([{
+                "API": "전체",
+                "key": "ALL",
+                "행수": 0,
+                "상태": "호출은 시도했지만 상태표 생성 실패",
+                "URL": "",
+            }])
+        st.session_state["live_data"] = data if isinstance(data, dict) else {}
+        st.session_state["api_status"] = status
+        st.session_state["live_race_key"] = f"{rc_date}|{meet}|{race_no}"
+        return st.session_state["live_data"], status
+    except Exception as e:
+        status = pd.DataFrame([{
+            "API": "전체",
+            "key": "ALL",
+            "행수": 0,
+            "상태": f"즉시 API 점검 실패: {str(e)[:160]}",
+            "URL": "",
+        }])
+        st.session_state["api_status"] = status
+        return {}, status
+
 def render_api_hub_panel(status: pd.DataFrame, data: Dict[str, pd.DataFrame]) -> None:
+    """API 상태 / 허브 저장. 상태표가 비어 있으면 즉시 점검을 강제로 수행합니다."""
     st.markdown("### API 상태 / 허브 저장")
+    if status is None or not isinstance(status, pd.DataFrame) or status.empty:
+        try:
+            rc_date_probe = st.session_state.get("rc_date", today_kst() if "today_kst" in globals() else "")
+            meet_probe = st.session_state.get("meet", "서울")
+            race_probe = st.session_state.get("race_no", 1)
+            selected_probe = st.session_state.get("selected_api_keys", [k for k, _ in API_LABELS] if "API_LABELS" in globals() else [])
+            data, status = immediate_api_status_probe(rc_date_probe, meet_probe, race_probe, selected_probe)
+        except Exception as e:
+            status = pd.DataFrame([{"API": "전체", "key": "ALL", "행수": 0, "상태": f"즉시점검 실패: {str(e)[:120]}", "URL": ""}])
+            data = data or {}
+
     with st.expander("API 상태 요약", expanded=True):
         if isinstance(status, pd.DataFrame) and not status.empty:
-            keep_cols = [c for c in ["API", "행수", "상태", "URL"] if c in status.columns]
-            st.dataframe(status[keep_cols] if keep_cols else status, width="stretch", height=360)
+            keep_cols = [c for c in ["API", "key", "행수", "상태", "URL"] if c in status.columns]
+            st.dataframe(status[keep_cols] if keep_cols else status, use_container_width=True, height=360)
+            try:
+                ok_rows = int((pd.to_numeric(status.get("행수", 0), errors="coerce").fillna(0) > 0).sum())
+                st.caption(f"즉시 상태표 생성됨 · 수신 성공 API {ok_rows}개")
+            except Exception:
+                pass
         else:
-            st.info("아직 API 호출 전입니다.")
+            st.warning("API 상태표를 만들지 못했습니다. API Key/Secrets/수집모드를 확인하세요.")
+
     with st.expander("허브 저장 현황", expanded=True):
         local_hub_df = load_local_hub()
         big_df = load_bigdata()
@@ -6790,9 +7033,10 @@ def render_api_hub_panel(status: pd.DataFrame, data: Dict[str, pd.DataFrame]) ->
         h3.metric("현재 데이터", f"{sum(len(v) for v in data.values()) if data else 0:,}행")
         if not local_hub_df.empty:
             show_cols = [c for c in ["저장시각", "경마장", "경주번호", "공격삼쌍승", "방어삼복승", "예상배당", "신뢰도", "추천금액"] if c in local_hub_df.columns]
-            st.dataframe(local_hub_df[show_cols].tail(30) if show_cols else local_hub_df.tail(30), width="stretch", height=330)
+            st.dataframe(local_hub_df[show_cols].tail(30) if show_cols else local_hub_df.tail(30), use_container_width=True, height=330)
         else:
             st.info("허브 저장 데이터가 아직 없습니다.")
+
     with st.expander("API URL 26개 자동내장 확인용", expanded=False):
         for k, label in API_LABELS:
             st.caption(f"{label}: {get_url(k)}")
@@ -7045,7 +7289,11 @@ def render() -> None:
         switches = get_api_switches()
         selected = [k for k, _ in API_LABELS if switches.get(k, False)]
         selected = smart_selected_apis(collection_mode, selected)
-        st.caption(f"이번 수집 대상: {len(selected)}/26개 · 모드: {collection_mode}")
+        st.session_state["rc_date"] = rc_date
+        st.session_state["meet"] = meet
+        st.session_state["race_no"] = race_no
+        st.session_state["selected_api_keys"] = selected
+        st.caption(f"이번 수집 대상: {len(selected)}/26개 · 모드: {collection_mode}")  # IMMEDIATE_API_SESSION_KEYS_APPLY
         if collection_mode == "허브만 분석":
             st.error("현재 허브만 분석 모드입니다. 이 모드는 공식 API를 호출하지 않습니다. 실전 추천을 받으려면 실시간 API 우선 + 허브 보조로 바꾸세요.")  # HUB_ONLY_MODE_WARNING_APPLY
         if collection_mode == "스마트 자동":
@@ -7082,7 +7330,17 @@ def render() -> None:
     with tab3:
         status2 = st.session_state.get("api_status", pd.DataFrame())
         data3 = st.session_state.get("live_data", {})
+        if status2 is None or not isinstance(status2, pd.DataFrame) or status2.empty:
+            if st.session_state.get("race_scope") == "전체 경마장 자동":
+                sched_probe, _log_probe = load_all_meet_schedule_for_monitor(rc_date) if "load_all_meet_schedule_for_monitor" in globals() else (pd.DataFrame(), pd.DataFrame())
+                targets_probe = _current_or_next_races(sched_probe, per_meet=1) if "_current_or_next_races" in globals() else pd.DataFrame()
+                data3, status2 = force_collect_real_data_for_targets(rc_date, targets_probe, selected)  # FORCE_REAL_COLLECTION_API_TAB_APPLY
+            else:
+                meet_probe = "서울" if str(meet) == "전체" else meet
+                race_probe = 1 if int(race_no or 0) <= 0 else int(race_no)
+                data3, status2 = immediate_api_status_probe(rc_date, meet_probe, race_probe, selected)  # IMMEDIATE_API_TAB_PROBE_APPLY
         st.success("✅ API URL 26개 자동 탑재 완료: 재입력 없이 호출/ON-OFF만 사용")
+        st.info("결과/배당 계열 일부 API는 경주시간 전이면 대기 상태가 정상입니다. 하지만 상태표는 즉시 표시됩니다.")
         render_api_hub_panel(status2, data3)
     with tab4:
         if st.session_state.get("race_scope") == "전체 경마장 자동":

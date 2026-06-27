@@ -1,13 +1,13 @@
-MARU KRA ALL RACE SCOPE TIMEDTA FIX
+MARU KRA FORCE REAL DATA COLLECTION
 
 수정:
-- 전체 경마장 자동 모드에서 발생한 AttributeError 수정
-- 원인: datetime이 모듈이 아니라 클래스처럼 잡힌 상태에서 datetime.timedelta를 호출
-- 해결: pd.Timedelta로 교체하고 _current_or_next_races 안전 버전으로 재정의
-- 기존 전체 경마장/전체 경주일정/허브/원인분석/엑셀 기능 유지
+- 상태표만 만들지 않고 실제 API 자료를 받아오도록 강제
+- 전체 경마장 자동 모드에서 서울/부산경남/제주 현재·다음 경주 대상 자료 수집
+- 수집 결과를 live_data/api_status/live_cache/api_received_files/hub summary에 저장
+- 화면에서 실제 수신행수와 받은 자료 미리보기 표시
 
 모바일:
-https://maru-kra-final-clean.streamlit.app/?mode=mobile&v=timedeltafix1
+https://maru-kra-final-clean.streamlit.app/?mode=mobile&v=forcedata1
 
 PC:
-https://maru-kra-final-clean.streamlit.app/?v=timedeltafix1
+https://maru-kra-final-clean.streamlit.app/?v=forcedata1
