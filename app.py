@@ -1,3 +1,4 @@
+# DATETIME_TIMEDELTA_ATTRIBUTE_FIX
 # ALL_MEET_EXCEL_VIEWER_FIX
 # -*- coding: utf-8 -*-
 """
@@ -4170,7 +4171,7 @@ def _current_or_next_races(sched: pd.DataFrame, per_meet: int = 3) -> pd.DataFra
     for meet, g in df.groupby("경마장", dropna=False):
         gg = g.copy()
         if "_dt" in gg.columns:
-            future = gg[gg["_dt"].notna() & (gg["_dt"] >= now - datetime.timedelta(minutes=20))]
+            future = gg[gg["_dt"].notna() & (gg["_dt"] >= now - pd.Timedelta(minutes=20))]
             if not future.empty:
                 gg = future.sort_values("_dt").head(per_meet)
             else:
@@ -4716,7 +4717,7 @@ def _detect_current_race_for_no_click(rc_date: str = "", meet: str = "서울") -
                 now = now_kst() if "now_kst" in globals() else datetime.datetime.now()
                 if "경주시각" in sdf.columns:
                     sdf["_dt"] = pd.to_datetime(sdf["경주시각"], errors="coerce")
-                    future = sdf[sdf["_dt"].notna() & (sdf["_dt"] >= now - datetime.timedelta(minutes=20))]
+                    future = sdf[sdf["_dt"].notna() & (sdf["_dt"] >= now - pd.Timedelta(minutes=20))]
                     if not future.empty:
                         return int(float(future.sort_values("_dt").iloc[0]["경주번호"]))
                 return int(float(sdf.sort_values("경주번호").iloc[0]["경주번호"]))
@@ -7093,6 +7094,68 @@ def render() -> None:
 
     if int(auto_refresh or 0) > 0:
         st.caption(f"자동 새로고침 설정: {int(auto_refresh)}초 · 현재 핫픽스에서는 자동 새로고침 대신 수동 새로고침을 권장합니다.")
+
+
+
+
+
+# DATETIME_TIMEDELTA_ATTRIBUTE_FIX_SAFE_OVERRIDE
+def _current_or_next_races(sched: pd.DataFrame, per_meet: int = 3) -> pd.DataFrame:
+    """전체 경마장 현재/다음 경주 계산. datetime.timedelta AttributeError 방지."""
+    if sched is None or not isinstance(sched, pd.DataFrame) or sched.empty:
+        return pd.DataFrame()
+    df = sched.copy()
+    dts = []
+    for _, r in df.iterrows():
+        try:
+            dts.append(_parse_schedule_dt_for_monitor(dict(r)))
+        except Exception:
+            dts.append(None)
+    df["_dt"] = pd.to_datetime(dts, errors="coerce")
+    try:
+        now = now_kst() if "now_kst" in globals() else pd.Timestamp.now()
+        now_ts = pd.Timestamp(now)
+    except Exception:
+        now_ts = pd.Timestamp.now()
+
+    try:
+        df["상태"] = []
+    except Exception:
+        pass
+    statuses = []
+    for x in df["_dt"].tolist():
+        try:
+            if pd.isna(x):
+                statuses.append("시간미확인")
+            else:
+                mins = int((pd.Timestamp(x) - now_ts).total_seconds() // 60)
+                if mins > 25:
+                    statuses.append(f"대기 {mins}분전")
+                elif -20 <= mins <= 25:
+                    statuses.append(f"수집창 {mins}분")
+                elif mins < -20:
+                    statuses.append("종료/결과확인")
+                else:
+                    statuses.append("대기")
+        except Exception:
+            statuses.append("시간미확인")
+    df["상태"] = statuses
+
+    out = []
+    group_col = "경마장" if "경마장" in df.columns else None
+    groups = df.groupby(group_col, dropna=False) if group_col else [("전체", df)]
+    for meet_name, g in groups:
+        gg = g.copy()
+        try:
+            future = gg[gg["_dt"].notna() & (gg["_dt"] >= now_ts - pd.Timedelta(minutes=20))]
+            if not future.empty:
+                gg = future.sort_values("_dt").head(per_meet)
+            else:
+                gg = g.sort_values("_dt", na_position="last").tail(per_meet)
+        except Exception:
+            gg = g.head(per_meet)
+        out.append(gg)
+    return pd.concat(out, ignore_index=True) if out else pd.DataFrame()
 
 
 if __name__ == "__main__":
