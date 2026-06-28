@@ -8731,6 +8731,74 @@ def render_mobile_safe_home(rc_date: str = "", meet: str = "전체", race_no: An
     st.caption("모바일은 확인 전용입니다. 수집/분석/저장은 PC와 허브에서 처리합니다.")
 
 
+
+
+
+# GOOGLE_SHEET_VISIBLE_MENU_FIX
+DEFAULT_MARU_KRA_SHEET_ID = "1uT8IQfbpjhblvFOsFdBSmAnGHXzqhlZQ5jsBayLTpwc"
+DEFAULT_MARU_KRA_SHEET_NAME = "MARU_KRA_HUB"
+
+def _get_sheet_id_visible() -> str:
+    try:
+        sid = ""
+        if "st" in globals():
+            try:
+                sid = str(st.secrets.get("SHEET_ID", "") or "")
+            except Exception:
+                sid = ""
+        return sid or DEFAULT_MARU_KRA_SHEET_ID
+    except Exception:
+        return DEFAULT_MARU_KRA_SHEET_ID
+
+def _get_sheet_url_visible() -> str:
+    return f"https://docs.google.com/spreadsheets/d/{_get_sheet_id_visible()}/edit"
+
+def render_google_sheet_visible_center() -> None:
+    st.markdown("### 📗 구글시트 허브")
+    st.caption("허브 저장 위치를 화면에서 바로 확인합니다. 저장 성공 여부는 아래 확인센터에서 봅니다.")
+
+    sid = _get_sheet_id_visible()
+    url = _get_sheet_url_visible()
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("구글시트", "연결 주소 표시")
+    c2.metric("기본 탭", DEFAULT_MARU_KRA_SHEET_NAME)
+    c3.metric("SHEET_ID", sid[-8:] if sid else "없음")
+
+    st.code(url, language="text")
+    st.link_button("📗 구글시트 MARU_KRA_HUB 열기", url, use_container_width=True)
+
+    try:
+        secret_has_sheet = False
+        secret_has_json = False
+        try:
+            secret_has_sheet = bool(st.secrets.get("SHEET_ID", ""))
+            secret_has_json = bool(st.secrets.get("SERVICE_ACCOUNT_JSON", ""))
+        except Exception:
+            pass
+        rows = [
+            {"항목": "SHEET_ID", "상태": "OK" if secret_has_sheet else "기본값 사용", "값": sid},
+            {"항목": "SERVICE_ACCOUNT_JSON", "상태": "OK" if secret_has_json else "없음/확인필요", "값": "Streamlit Secrets"},
+            {"항목": "기본 시트명", "상태": "OK", "값": DEFAULT_MARU_KRA_SHEET_NAME},
+            {"항목": "저장 확인", "상태": "아래 저장 확인센터 확인", "값": "출처가 허브/구글시트면 성공"},
+        ]
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+    except Exception:
+        pass
+
+    if "render_hub_storage_status_center" in globals():
+        render_hub_storage_status_center()
+
+def _render_sidebar_google_sheet_link() -> None:
+    try:
+        st.sidebar.markdown("---")
+        st.sidebar.markdown("### 📗 구글시트 허브")
+        st.sidebar.link_button("MARU_KRA_HUB 열기", _get_sheet_url_visible(), use_container_width=True)
+        st.sidebar.caption("저장 확인은 PC 화면의 구글시트 허브 메뉴에서 확인")
+    except Exception:
+        pass
+
+
 def render() -> None:
     # PC 기본 화면은 기존 그대로 유지합니다.
     # 휴대폰 접속은 URL 파라미터가 없어도 자동으로 모바일 10초 구매 화면으로 분리합니다.
@@ -8874,6 +8942,7 @@ def render() -> None:
         render_sequential_26api_center(rc_date, tab_m, tab_r)  # CURRENT_RACE_TARGET_MATCH_SEQ_TAB_APPLY
         render_recommendation_after_each_race_center(rc_date, tab_m, tab_r)  # CURRENT_RACE_TARGET_MATCH_RECOMMEND_TAB_APPLY
         render_pc_hub_recommend_confirm_center(rc_date, tab_m if "tab_m" in locals() else meet, tab_r if "tab_r" in locals() else race_no)  # HUB_PC_MOBILE_RECOMMEND_FLOW_TAB_APPLY
+        render_google_sheet_visible_center()  # GOOGLE_SHEET_VISIBLE_TAB_APPLY
         render_hub_pipeline_control_center(rc_date, tab_m if 'tab_m' in locals() else meet, tab_r if 'tab_r' in locals() else race_no)  # HUB_SHEET_DOUBLE_SAFETY_FLOW_TAB_APPLY
         render_file_and_runtime_check_center()  # FILE_RUNTIME_CHECK_TAB_APPLY
     with tab4:

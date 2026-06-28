@@ -1,17 +1,13 @@
-MARU KRA HUB SHEET DOUBLE SAFETY FLOW FIX
+MARU KRA GOOGLE SHEET VISIBLE MENU FIX
 
-최종 흐름:
-1. 허브/공식 API 자료 불러오기
-2. 원자료 요약을 허브/구글시트 + 로컬 JSON에 이중 저장
-3. 저장 후 다시 읽기 검증
-4. 분석/추천 생성
-5. 추천 결과를 mobile_recommend로 허브/구글시트 + 로컬 JSON 이중 저장
-6. 모바일은 mobile_recommend만 표시
-7. PC 화면에서 저장 여부 확인센터로 허브 저장 상태 확인
-
-추가 화면:
-- 허브 자료 저장·분석·추천 이중 안전장치
-- 허브/구글시트 저장 확인센터
+수정:
+- 사이드바에 '구글시트 허브' 바로가기 추가
+- PC API/허브 화면 안에 '구글시트 허브' 확인센터 표시
+- SHEET_ID와 구글시트 주소를 화면에 표시
+- 저장 확인센터를 구글시트 허브 화면에 같이 표시
+- 기본 SHEET_ID: 1uT8IQfbpjhblvFOsFdBSmAnGHXzqhlZQ5jsBayLTpwc
+- 기본 시트명: MARU_KRA_HUB
 
 주의:
-- 자동구매/자동결제 없음. 추천 결과 확인 및 수동 구매 참고용.
+- 구글시트 저장 성공 여부는 '출처: 허브/구글시트'로 확인
+- 자동구매/자동결제 없음
