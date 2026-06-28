@@ -1,14 +1,15 @@
-MARU KRA RESULT PRIORITY 26API RECOMMEND FIX
+MARU KRA DUPKEY AUTO SEQ FIX
 
 수정:
-- 26개 API 순차수집 순서를 추천/결과 정확도 우선으로 재정렬
-- 경주 전 기본자료 → 변수자료 → 배당/인기 → 결과/확정 → 보조자료 순서
-- API 하나 받을 때마다 CSV 저장
-- 추천 가능한 최소자료가 모이면 매 경기 추천 생성/허브 저장
-- 파일 검사 / 오류 검사 센터 추가
+- StreamlitDuplicateElementKey: seq_api_step_count 오류 수정
+- 순차수집센터의 selectbox/toggle 수동키 제거
+- 26개 API 순차수집은 자동으로 1개씩 진행
+- 같은 화면/탭에 여러 번 표시되어도 unique instance key 사용
+- 같은 분에 중복 API 호출하지 않도록 방지
+- 결과우선 26API 순서와 매경기 추천 기능 유지
 
 모바일:
-https://maru-kra-final-clean.streamlit.app/?mode=mobile&v=resultpriority1
+https://maru-kra-final-clean.streamlit.app/?mode=mobile&v=autoseqfix1
 
 PC:
-https://maru-kra-final-clean.streamlit.app/?v=resultpriority1
+https://maru-kra-final-clean.streamlit.app/?v=autoseqfix1

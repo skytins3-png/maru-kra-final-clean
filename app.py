@@ -4215,7 +4215,7 @@ def render_all_meet_all_race_monitor(rc_date: str, selected: List[str], sim_coun
     st.dataframe(targets[show_cols], use_container_width=True, hide_index=True, height=260)
 
     render_force_real_collection_center(rc_date, selected, targets)  # FORCE_REAL_COLLECTION_CENTER_ALL_MEET_APPLY
-    render_sequential_26api_center(rc_date, "서울", 1)  # SEQUENTIAL_26API_ALL_MEET_APPLY
+    render_sequential_26api_center(rc_date, "서울", 1, instance="all_meet")  # SEQUENTIAL_26API_ALL_MEET_APPLY
     render_recommendation_after_each_race_center(rc_date, "서울", 1)  # EACH_RACE_RECOMMEND_CENTER_ALL_MEET_APPLY
 
     st.markdown("#### 경마장별 첫 대상 자동 API 점검")
@@ -7848,6 +7848,91 @@ def render_file_and_runtime_check_center() -> None:
     st.dataframe(pd.DataFrame(checks), use_container_width=True, hide_index=True)
 
 
+
+
+
+# STREAMLIT_DUPLICATE_KEY_AUTO_SEQ_FIX
+def render_sequential_26api_center(rc_date: str, meet: str, race_no: Any, instance: str = "main") -> None:
+    """26개 API 하나씩 자동 접속→저장→다음 API 진행 센터. 중복 key 오류 방지."""
+    st.markdown("### 🔁 26개 API 자동 순차 수집센터")
+    st.caption("사이드/탭에서 수동 선택하지 않아도 자동으로 1개씩 접속해서 저장하고 다음 API로 넘어갑니다.")
+
+    meet_run = "서울" if str(meet or "전체") == "전체" else str(meet or "서울")
+    try:
+        race_run = int(float(race_no or 1))
+        if race_run <= 0:
+            race_run = 1
+    except Exception:
+        race_run = 1
+
+    unique = _safe_file_key("seq", instance, rc_date, meet_run, race_run)
+
+    # 자동 기본값: 한 번에 1개씩. 전체 경마장 화면은 중복 호출 방지를 위해 세션당 1분 1회만.
+    step_count = int(st.session_state.get(f"{unique}_step_count", 1) or 1)
+    st.session_state[f"{unique}_step_count"] = step_count
+
+    state = _load_seq_state().get(_seq_target_id(rc_date, meet_run, race_run), {})
+
+    # 자동 실행: 완료 전이면 현재 렌더에서 다음 API 1개 수행
+    last_run_key = f"{unique}_last_run_minute"
+    try:
+        now_minute = now_kst().strftime("%Y%m%d%H%M") if "now_kst" in globals() else dt.datetime.now().strftime("%Y%m%d%H%M")
+    except Exception:
+        now_minute = dt.datetime.now().strftime("%Y%m%d%H%M")
+
+    should_run = not state.get("완료", False)
+    # 같은 화면에 센터가 여러 번 그려져도 같은 분에는 1회만 실행해서 중복 호출 방지
+    if should_run and st.session_state.get(last_run_key) != now_minute:
+        with st.spinner(f"{meet_run} {race_run}R API 자동 순차 수집 중..."):
+            state = sequential_26api_step(rc_date, meet_run, race_run, step_count)
+            st.session_state[last_run_key] = now_minute
+    else:
+        state = _load_seq_state().get(_seq_target_id(rc_date, meet_run, race_run), state)
+
+    api_total = len(_seq_api_keys())
+    done = int(state.get("index", 0) or 0) if isinstance(state, dict) else 0
+    progress = min(1.0, done / max(1, api_total))
+    st.progress(progress, text=f"{done}/{api_total}개 완료")
+
+    rows = state.get("rows", []) if isinstance(state, dict) else []
+    ok_count = 0
+    total_rows = 0
+    for r in rows:
+        try:
+            cnt = int(r.get("행수", 0) or 0)
+            total_rows += cnt
+            if cnt > 0:
+                ok_count += 1
+        except Exception:
+            pass
+
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("완료 API", f"{done}/{api_total}")
+    m2.metric("수신 성공", ok_count)
+    m3.metric("총 수신행수", total_rows)
+    m4.metric("상태", "완료" if isinstance(state, dict) and state.get("완료") else "자동 진행중")
+
+    # reset button with unique key only
+    if st.button("이 경주 순차수집 처음부터 다시", key=f"{unique}_reset_btn", width="stretch"):
+        reset_sequential_26api(rc_date, meet_run, race_run)
+        st.rerun()
+
+    if rows:
+        df = pd.DataFrame(rows)
+        show = [c for c in ["순번", "단계", "API", "key", "행수", "상태", "추천판정", "완료시각", "저장파일"] if c in df.columns]
+        st.dataframe(df[show] if show else df, use_container_width=True, hide_index=True, height=360)
+    else:
+        st.info("아직 순차 수집 기록이 없습니다. 자동으로 1번 API부터 수집을 시작합니다.")
+
+    if isinstance(state, dict) and state.get("완료"):
+        st.success("26개 API 순차 수집 완료")
+    else:
+        next_idx = done
+        keys = _seq_api_keys()
+        if next_idx < len(keys):
+            st.info(f"다음 수집 예정: {next_idx+1}번 · {_seq_label(keys[next_idx])}")
+
+
 def render() -> None:
     # PC 기본 화면은 기존 그대로 유지합니다.
     # 휴대폰 접속은 URL 파라미터가 없어도 자동으로 모바일 10초 구매 화면으로 분리합니다.
@@ -7938,7 +8023,8 @@ def render() -> None:
         st.session_state["race_no"] = race_no
         st.session_state["selected_api_keys"] = selected
         st.caption(f"이번 수집 대상: {len(selected)}/26개 · 모드: {collection_mode}")
-        st.caption("첫 화면은 빠른 핵심 API 우선 수집 · 전체 26개는 상세/엑셀 확인에서 순차 점검")  # FAST_FIRST_SIDEBAR_NOTICE_APPLY  # IMMEDIATE_API_SESSION_KEYS_APPLY
+        st.caption("첫 화면은 빠른 핵심 API 우선 수집 · 전체 26개는 상세/엑셀 확인에서 순차 점검")  # FAST_FIRST_SIDEBAR_NOTICE_APPLY
+        st.caption("26개 API 순차수집은 자동 진행 · 수동 선택키 제거")  # AUTO_SEQ_SIDEBAR_NOTICE_APPLY  # IMMEDIATE_API_SESSION_KEYS_APPLY
         if collection_mode == "허브만 분석":
             st.error("현재 허브만 분석 모드입니다. 이 모드는 공식 API를 호출하지 않습니다. 실전 추천을 받으려면 실시간 API 우선 + 허브 보조로 바꾸세요.")  # HUB_ONLY_MODE_WARNING_APPLY
         if collection_mode == "스마트 자동":
@@ -7987,7 +8073,7 @@ def render() -> None:
         st.success("✅ API URL 26개 자동 탑재 완료: 재입력 없이 호출/ON-OFF만 사용")
         st.info("결과/배당 계열 일부 API는 경주시간 전이면 대기 상태가 정상입니다. 하지만 상태표는 즉시 표시됩니다.")
         render_api_hub_panel(status2, data3)
-        render_sequential_26api_center(rc_date, "서울" if str(meet) == "전체" else meet, 1 if int(race_no or 0) <= 0 else int(race_no))  # SEQUENTIAL_26API_TAB_APPLY
+        render_sequential_26api_center(rc_date, "서울" if str(meet) == "전체" else meet, 1 if int(race_no or 0) <= 0 else int(race_no), instance="api_tab")  # SEQUENTIAL_26API_TAB_APPLY
         render_recommendation_after_each_race_center(rc_date, "서울" if str(meet) == "전체" else meet, 1 if int(race_no or 0) <= 0 else int(race_no))  # EACH_RACE_RECOMMEND_CENTER_TAB_APPLY
         render_file_and_runtime_check_center()  # FILE_RUNTIME_CHECK_TAB_APPLY
     with tab4:
