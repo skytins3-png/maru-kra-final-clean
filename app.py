@@ -8444,6 +8444,7 @@ def render_mobile_safe_home(rc_date: str = "", meet: str = "전체", race_no: An
     """
     st.set_page_config(page_title="MARU KRA 모바일", page_icon="🏇", layout="centered")
     st.markdown("## 🏇 MARU KRA 모바일 추천결과")
+    st.info("🛡️ stable2 안정화판 적용됨")  # STABLE_VERSION_MOBILE_BADGE_APPLY
     st.caption("모바일은 계산/수집 화면이 아니라 PC에서 확인 후 허브에 저장한 추천 결과를 보는 화면입니다.")
 
     rec = _hub_load_latest_recommend()
@@ -9192,6 +9193,41 @@ def render_api_timeout_error_stable_center(rc_date, meet, race_no):
         if rr: st.dataframe(pd.DataFrame(rr), use_container_width=True, hide_index=True)
 
 
+
+
+
+# STABLE_VERSION_VISIBLE_UI_FIX
+def render_stable_version_banner():
+    st.markdown("""
+    <div style="padding:14px;border-radius:14px;border:2px solid #ffcc00;background:#fff8d6;margin:8px 0 14px 0;">
+      <div style="font-size:22px;font-weight:900;">🛡️ MARU KRA 안정화판 stable2 적용됨</div>
+      <div style="font-size:14px;">API 실패해도 앱 멈추지 않음 · 성공 API만 분석 · 404/500/빈자료 분류</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+def render_stable_quick_panel(rc_date, meet, race_no):
+    st.markdown("### 🛡️ 안정화판 빠른 실행")
+    st.caption("이 박스가 보이면 새 파일이 적용된 것입니다.")
+    m = "서울" if str(meet or "전체") == "전체" else str(meet or "서울")
+    try:
+        r = int(float(race_no or 1))
+        if r <= 0:
+            r = 1
+    except Exception:
+        r = 1
+    c1,c2,c3 = st.columns(3)
+    c1.metric("버전","stable2")
+    c2.metric("대상",f"{m} {r}R")
+    c3.metric("모드","에러 안정분석")
+    if st.button("🛡️ stable2 안정 수집+분석 바로 실행", use_container_width=True, key=f"stable2_quick_{rc_date}_{m}_{r}"):
+        if "stable_fetch_batch_and_analyze" in globals():
+            stable_fetch_batch_and_analyze(rc_date, m, r, max_count=26, retry=1)
+            st.success("stable2 안정 수집/분석 완료")
+            st.rerun()
+        else:
+            st.error("안정 분석 함수가 없습니다. 파일 적용이 완전하지 않습니다.")
+
+
 def render() -> None:
     # PC 기본 화면은 기존 그대로 유지합니다.
     # 휴대폰 접속은 URL 파라미터가 없어도 자동으로 모바일 10초 구매 화면으로 분리합니다.
@@ -9335,6 +9371,7 @@ def render() -> None:
         render_sequential_26api_center(rc_date, tab_m, tab_r)  # CURRENT_RACE_TARGET_MATCH_SEQ_TAB_APPLY
         render_recommendation_after_each_race_center(rc_date, tab_m, tab_r)  # CURRENT_RACE_TARGET_MATCH_RECOMMEND_TAB_APPLY
         render_pc_hub_recommend_confirm_center(rc_date, tab_m if "tab_m" in locals() else meet, tab_r if "tab_r" in locals() else race_no)  # HUB_PC_MOBILE_RECOMMEND_FLOW_TAB_APPLY
+        render_stable_quick_panel(rc_date, tab_m if 'tab_m' in locals() else meet, tab_r if 'tab_r' in locals() else race_no)  # STABLE_QUICK_PANEL_TAB_APPLY
         render_api_timeout_error_stable_center(rc_date, tab_m if 'tab_m' in locals() else meet, tab_r if 'tab_r' in locals() else race_no)  # API_TIMEOUT_ERROR_STABLE_ANALYSIS_TAB_APPLY
         render_api_priority_strategy_center()  # API_PREFETCH_REALTIME_PRIORITY_26_TAB_APPLY
         render_prefetch_static_data_center(rc_date, tab_m if 'tab_m' in locals() else meet, tab_r if 'tab_r' in locals() else race_no)
