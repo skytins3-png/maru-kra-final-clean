@@ -35,6 +35,7 @@ import urllib3
 import streamlit as st
 import streamlit.components.v1 as components
 import inspect
+import traceback
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -9033,6 +9034,164 @@ def render_prefetch_static_data_center(rc_date: str, meet: str, race_no: Any) ->
             st.dataframe(pd.DataFrame(old),use_container_width=True,hide_index=True)
 
 
+
+
+
+# API_TIMEOUT_ERROR_STABLE_ANALYSIS_FIX
+API_TIMEOUT_SECONDS = 10
+API_RETRY_COUNT = 1
+
+def stable_error_kind(status="", rows=0, exc=None):
+    if exc is not None:
+        name = exc.__class__.__name__
+        msg = str(exc)
+        if "timeout" in name.lower() or "timeout" in msg.lower():
+            return "TIMEOUT: 서버 지연/응답 없음"
+        if "json" in name.lower() or "json" in msg.lower():
+            return "PARSE_ERROR: 응답 형식 문제"
+        if "connect" in name.lower() or "connection" in name.lower():
+            return "CONNECTION_ERROR: 연결 문제"
+        return "EXCEPTION: " + name
+    s = str(status or "")
+    if "HTTP 404" in s: return "HTTP_404: 주소/엔드포인트 확인"
+    if "HTTP 500" in s: return "HTTP_500: 서버/파라미터 문제"
+    if "HTTP 401" in s or "HTTP 403" in s: return "AUTH_ERROR: 키/권한 확인"
+    if int(rows or 0) == 0: return "NO_DATA: 자료 없음/공개 전"
+    return "OK: 데이터 수신"
+
+def safe_fetch_one_api_stable(key, rc_date, meet, race_no, retry=1):
+    started = time.time()
+    last_exc = None
+    for attempt in range(int(retry or 0) + 1):
+        try:
+            df, msg, used_url = fetch_one_api(key, rc_date, meet, race_no)
+            if df is None: df = pd.DataFrame()
+            if not isinstance(df, pd.DataFrame): df = pd.DataFrame(df)
+            rows = int(len(df))
+            meta = {
+                "API": _api_label_safe(key) if "_api_label_safe" in globals() else key,
+                "key": key,
+                "시도": attempt + 1,
+                "행수": rows,
+                "소요초": round(time.time() - started, 2),
+                "오류분류": stable_error_kind(msg, rows),
+                "상태": str(msg)[:220],
+                "완료시각": now_str() if "now_str" in globals() else str(dt.datetime.now()),
+            }
+            return df, meta
+        except Exception as e:
+            last_exc = e
+            if attempt < int(retry or 0):
+                time.sleep(0.5)
+                continue
+    meta = {
+        "API": _api_label_safe(key) if "_api_label_safe" in globals() else key,
+        "key": key,
+        "시도": int(retry or 0) + 1,
+        "행수": 0,
+        "소요초": round(time.time() - started, 2),
+        "오류분류": stable_error_kind(exc=last_exc),
+        "상태": ("ERROR: " + str(last_exc))[:220],
+        "완료시각": now_str() if "now_str" in globals() else str(dt.datetime.now()),
+    }
+    return pd.DataFrame(), meta
+
+def stable_fetch_batch_and_analyze(rc_date, meet, race_no, max_count=26, retry=1):
+    keys = _seq_api_keys() if "_seq_api_keys" in globals() else []
+    keys = list(keys)[:int(max_count or 26)]
+    data, rows = {}, []
+    for i, key in enumerate(keys, 1):
+        try:
+            df, meta = safe_fetch_one_api_stable(key, rc_date, meet, race_no, retry=retry)
+            meta["순번"] = i
+            meta["분류"] = _api_collection_bucket(key) if "_api_collection_bucket" in globals() else ""
+            rows.append(meta)
+            if isinstance(df, pd.DataFrame) and not df.empty:
+                df2 = df.copy()
+                df2["수집API"] = key
+                df2["수집경마장"] = meet
+                df2["수집경주번호"] = race_no
+                data[key] = df2
+        except Exception as e:
+            rows.append({"순번": i, "API": key, "key": key, "행수": 0, "오류분류": stable_error_kind(exc=e), "상태": str(e)[:220]})
+            continue
+    status = pd.DataFrame(rows)
+    st.session_state["live_data"] = data
+    st.session_state["api_status"] = status
+    st.session_state["stable_status_last"] = status
+
+    rec = {}
+    try:
+        if "build_recommendation_after_each_race" in globals():
+            rec = build_recommendation_after_each_race(rc_date, meet, race_no, data)
+        else:
+            rec = {"추천가능": "N", "상태": "추천 함수 없음"}
+    except Exception as e:
+        rec = {"추천가능": "N", "상태": "분석 오류: " + str(e)[:160], "오류분류": stable_error_kind(exc=e)}
+    if not isinstance(rec, dict): rec = {"추천가능": "N", "상태": "추천 결과 형식 오류"}
+    rec["분석방식"] = "성공 API만 사용한 안정 분석"
+    rec["분석시각"] = now_str() if "now_str" in globals() else str(dt.datetime.now())
+    st.session_state["stable_rec_last"] = rec
+
+    try:
+        d = DATA_DIR if "DATA_DIR" in globals() else Path("maru_kra_data")
+        d.mkdir(parents=True, exist_ok=True)
+        status.to_csv(d / "api_error_stable_log.csv", index=False, encoding="utf-8-sig")
+    except Exception:
+        pass
+    try:
+        if "double_safety_save" in globals():
+            double_safety_save("stable_analysis_recommend", rec)
+    except Exception:
+        pass
+    return data, status, rec
+
+def render_api_timeout_error_stable_center(rc_date, meet, race_no):
+    st.markdown("### 🛡️ API 타임아웃/에러처리 안정화 분석센터")
+    st.caption("API 하나가 실패해도 앱을 멈추지 않고 다음 API로 넘어가며, 성공 자료만으로 분석합니다.")
+    meet2 = "서울" if str(meet or "전체") == "전체" else str(meet or "서울")
+    try:
+        race_no2 = int(float(race_no or 1))
+        if race_no2 <= 0: race_no2 = 1
+    except Exception:
+        race_no2 = 1
+
+    c1, c2, c3 = st.columns(3)
+    retry = c1.selectbox("재시도", [0, 1, 2], index=1, key=f"stable_retry_{meet2}_{race_no2}")
+    count = c2.selectbox("수집 개수", [5, 10, 15, 26], index=3, key=f"stable_count_{meet2}_{race_no2}")
+    c3.metric("대상", f"{meet2} {race_no2}R")
+
+    if st.button("🛡️ 안정 수집 후 분석 실행", use_container_width=True, key=f"stable_run_{rc_date}_{meet2}_{race_no2}"):
+        stable_fetch_batch_and_analyze(rc_date, meet2, race_no2, max_count=int(count), retry=int(retry))
+        st.success("안정 수집/분석 완료")
+        st.rerun()
+
+    status = st.session_state.get("stable_status_last", pd.DataFrame())
+    if isinstance(status, pd.DataFrame) and not status.empty:
+        show = [c for c in ["순번","분류","API","key","행수","소요초","오류분류","상태","완료시각"] if c in status.columns]
+        st.dataframe(status[show], use_container_width=True, hide_index=True)
+        try:
+            ok = int((status["행수"].fillna(0).astype(int) > 0).sum())
+            total = int(status["행수"].fillna(0).astype(int).sum())
+            a,b,c = st.columns(3)
+            a.metric("성공 API", ok)
+            b.metric("실패/빈자료", len(status)-ok)
+            c.metric("총 수신행수", total)
+        except Exception:
+            pass
+
+    rec = st.session_state.get("stable_rec_last", {})
+    if isinstance(rec, dict) and rec:
+        st.markdown("#### 안정 분석 결과")
+        if rec.get("추천가능") == "Y":
+            st.success(rec.get("상태", "추천 생성 완료"))
+        else:
+            st.warning(rec.get("상태", "추천 대기/자료 부족"))
+        keys = ["경마장","경주번호","안정형대표","변수형대표","고배당형대표","예상배당","신뢰도","추천사유","분석방식","분석시각","오류분류"]
+        rr = [{"항목": k, "값": rec.get(k, "")} for k in keys if rec.get(k, "") != ""]
+        if rr: st.dataframe(pd.DataFrame(rr), use_container_width=True, hide_index=True)
+
+
 def render() -> None:
     # PC 기본 화면은 기존 그대로 유지합니다.
     # 휴대폰 접속은 URL 파라미터가 없어도 자동으로 모바일 10초 구매 화면으로 분리합니다.
@@ -9176,6 +9335,7 @@ def render() -> None:
         render_sequential_26api_center(rc_date, tab_m, tab_r)  # CURRENT_RACE_TARGET_MATCH_SEQ_TAB_APPLY
         render_recommendation_after_each_race_center(rc_date, tab_m, tab_r)  # CURRENT_RACE_TARGET_MATCH_RECOMMEND_TAB_APPLY
         render_pc_hub_recommend_confirm_center(rc_date, tab_m if "tab_m" in locals() else meet, tab_r if "tab_r" in locals() else race_no)  # HUB_PC_MOBILE_RECOMMEND_FLOW_TAB_APPLY
+        render_api_timeout_error_stable_center(rc_date, tab_m if 'tab_m' in locals() else meet, tab_r if 'tab_r' in locals() else race_no)  # API_TIMEOUT_ERROR_STABLE_ANALYSIS_TAB_APPLY
         render_api_priority_strategy_center()  # API_PREFETCH_REALTIME_PRIORITY_26_TAB_APPLY
         render_prefetch_static_data_center(rc_date, tab_m if 'tab_m' in locals() else meet, tab_r if 'tab_r' in locals() else race_no)
         render_google_sheet_visible_center()  # GOOGLE_SHEET_VISIBLE_TAB_APPLY
