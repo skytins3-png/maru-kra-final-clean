@@ -1,0 +1,49 @@
+{
+  "version": "MARU_MASTER_HUB_FINAL_1.5_HARD_DUPKEY_FIX",
+  "created_at": "2026-06-28 14:44:35 KST",
+  "project": "경마앱",
+  "repo": "skytins3-png/maru-kra-final-clean",
+  "original_file": "MARU_KRA_GOOGLE_SHEET_URL_INPUT_FIX_APP_ONLY_1_.zip",
+  "syntax_ok": true,
+  "syntax_msg": "py_compile 통과",
+  "changes": [
+    "use_container_width=True 52개 교체"
+  ],
+  "scan_rows": [
+    {
+      "검사항목": "AST 문법검사",
+      "상태": "통과",
+      "설명": "통과",
+      "조치": "없음"
+    },
+    {
+      "검사항목": "py_compile 검사",
+      "상태": "통과",
+      "설명": "통과",
+      "조치": "없음"
+    },
+    {
+      "검사항목": "구버전 표 옵션",
+      "상태": "확인필요",
+      "설명": "52개",
+      "조치": "width='stretch' 또는 width='content'로 교체"
+    },
+    {
+      "검사항목": "tabs[-1] 몰림",
+      "상태": "통과",
+      "설명": "0개",
+      "조치": "명시 탭으로 변경"
+    },
+    {
+      "검사항목": "중복 Streamlit key",
+      "상태": "통과",
+      "설명": "[]",
+      "조치": "key 고유화 필요"
+    },
+    {
+      "발견": "특정 규칙 매칭 없음",
+      "뜻": "일반 오류 또는 앱 내부 오류일 수 있음",
+      "권장조치": "전체 로그와 app.py를 함께 업그레이드 엔진에 넣어 검사"
+    }
+  ]
+}
