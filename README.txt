@@ -1,12 +1,13 @@
-MARU KRA GOOGLE SHEET URL INPUT FIX
+MARU KRA GOOGLE SHEET VISIBLE MENU FIX
 
 수정:
-- 깨진 구글시트 주소를 기본 링크로 고정하지 않음
-- Streamlit Secrets의 SHEET_ID를 우선 사용
-- PC 화면에서 실제 구글시트 주소/SHEET_ID를 붙여넣어 화면 연결값으로 사용할 수 있음
-- 사이드바 구글시트 버튼도 현재 연결값 기준으로 표시
-- 저장 확인센터 유지
+- 사이드바에 '구글시트 허브' 바로가기 추가
+- PC API/허브 화면 안에 '구글시트 허브' 확인센터 표시
+- SHEET_ID와 구글시트 주소를 화면에 표시
+- 저장 확인센터를 구글시트 허브 화면에 같이 표시
+- 기본 SHEET_ID: 1uT8IQfbpjhblvFOsFdBSmAnGHXzqhlZQ5jsBayLTpwc
+- 기본 시트명: MARU_KRA_HUB
 
 주의:
-- 앱 화면 입력값은 화면 연결 표시용입니다.
-- 실제 구글시트 저장은 Streamlit Secrets의 SHEET_ID + SERVICE_ACCOUNT_JSON + 시트 공유 권한이 필요합니다.
+- 구글시트 저장 성공 여부는 '출처: 허브/구글시트'로 확인
+- 자동구매/자동결제 없음
