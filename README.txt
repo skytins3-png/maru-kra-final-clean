@@ -1,15 +1,17 @@
-MARU KRA TODAY ONLY RETENTION FIX
+MARU KRA HARD FINAL STABLE
 
 수정:
-- 영구보존이 아니라 오늘 받은 자료만 보관
-- 앱 시작 시 오늘 날짜가 아닌 순차수집/수신파일/캐시성 자료 자동 정리
-- sequential_26api_state도 오늘 날짜 기록만 유지
-- 허브 저장은 오늘 날짜 키로 저장하고 최신 포인터만 갱신
-- 오늘 자료 보관 상태 화면 추가
-- 노위젯 자동순차/결과우선 26API/매경기 추천 유지
-
-모바일:
-https://maru-kra-final-clean.streamlit.app/?mode=mobile&v=todayonly1
+- 최종 override를 if __main__ 바로 위에 배치해 예전 함수가 덮어쓰는 문제 차단
+- StreamlitDuplicateElementKey reset/selectbox/button 문제 원천 차단
+- datetime.timedelta AttributeError 최종 차단
+- collection_mode NameError 방지
+- use_container_width 경고 방지
+- ArrowTypeError mixed type 표시 경고 방지
+- 오늘 받은 자료만 오늘 보관 유지
+- 결과우선 26개 API 자동 순차수집 유지
 
 PC:
-https://maru-kra-final-clean.streamlit.app/?v=todayonly1
+https://maru-kra-final-clean.streamlit.app/?v=hardfinal1
+
+모바일:
+https://maru-kra-final-clean.streamlit.app/?mode=mobile&v=hardfinal1
