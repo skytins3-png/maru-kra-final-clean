@@ -1,0 +1,18 @@
+{
+  "project_choice": "경마앱",
+  "project": "maru-kra-final-clean",
+  "repo": "maru-kra-final-clean",
+  "command_type": "기능추가",
+  "command_text": "문제점이 뭔지 찾아줘 \n",
+  "attached_files": [],
+  "created_at": "2026-06-28_10-03-59_KST",
+  "status": "REGISTERED",
+  "workflow": [
+    "명령사항 접수",
+    "보관소 저장",
+    "검사",
+    "자동패치/풀자동화",
+    "GitHub 자동반영",
+    "Streamlit 재배포 확인"
+  ]
+}
