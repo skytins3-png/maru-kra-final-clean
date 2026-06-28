@@ -34,6 +34,7 @@ import requests
 import urllib3
 import streamlit as st
 import streamlit.components.v1 as components
+import inspect
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -7965,6 +7966,130 @@ def render_sequential_26api_center(rc_date: str, meet: str, race_no: Any) -> Non
         last_status = _seq_last_row_status(item)
         if "HTTP 500" in last_status or "HTTP 404" in last_status or "ERROR" in last_status.upper():
             st.warning("마지막 API가 오류였지만 실패로 저장하고 다음 API로 넘어가게 되어 있습니다.")
+    else:
+        st.caption("아직 수집 기록이 없습니다.")
+
+
+
+
+
+# STREAMLIT_DUPLICATE_WIDGET_KEY_FIX
+def _seq_widget_scope(target: str) -> str:
+    """
+    StreamlitDuplicateElementKey 방지.
+    같은 26개 API 센터가 대시보드/검색/API탭 등에서 같은 target으로 2번 호출되어도
+    호출 위치 line number를 key에 붙여 위젯 key가 절대 겹치지 않게 합니다.
+    """
+    try:
+        caller = inspect.stack()[2]
+        loc = f"{Path(str(caller.filename)).stem}_{caller.lineno}"
+    except Exception:
+        loc = "seq"
+    return _safe_file_key(f"{loc}_{target}") if "_safe_file_key" in globals() else f"{loc}_{target}".replace(" ", "_")
+
+def render_sequential_26api_center(rc_date: str, meet: str, race_no: Any) -> None:
+    """
+    중복 key 방지 + 멈춤 방지 버전.
+    - 같은 화면에서 2번 호출되어도 selectbox/toggle/button key가 충돌하지 않음
+    - 자동 순차 진행 ON이면 1개씩 실행 후 rerun
+    - 404/500도 실패로 저장하고 다음 API 진행
+    """
+    st.markdown("### 🔁 26개 API 자동 순차 수집센터")
+    st.caption("자동으로 1개씩 접속 → 성공/실패 저장 → 다음 API로 진행합니다. 404/500도 멈추지 않습니다.")
+
+    meet2 = "서울" if str(meet or "전체") == "전체" else str(meet or "서울")
+    try:
+        race_no2 = int(float(race_no or 1))
+        if race_no2 <= 0:
+            race_no2 = 1
+    except Exception:
+        race_no2 = 1
+
+    target = _seq_target_id(rc_date, meet2, race_no2)
+    widget_scope = _seq_widget_scope(target)
+
+    state = _load_seq_state()
+    item = state.get(target)
+    api_keys = _seq_api_keys()
+
+    if not isinstance(item, dict):
+        reset_sequential_26api(rc_date, meet2, race_no2)
+        state = _load_seq_state()
+        item = state.get(target, {})
+
+    idx = int(item.get("index", 0) or 0)
+    done = min(idx, len(api_keys))
+    total = len(api_keys)
+    rows = item.get("rows", []) if isinstance(item.get("rows", []), list) else []
+    success = sum(1 for r in rows if str(r.get("상태", "")).upper().startswith("OK"))
+    total_rows = sum(int(r.get("행수", 0) or 0) for r in rows)
+
+    st.progress(done / max(total, 1), text=f"{done}/{total}개 완료")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("완료 API", f"{done}/{total}")
+    c2.metric("수신 성공", success)
+    c3.metric("총 수신행수", total_rows)
+    c4.metric("상태", "완료" if done >= total else "자동 진행중")
+
+    if done < total:
+        next_key = api_keys[done]
+        st.info(f"다음 수집 예정: {done+1}번 / {_api_stage_name(next_key)} / {_seq_label(next_key)} / `{next_key}`")
+    else:
+        st.success("26개 API 순차 수집이 완료되었습니다.")
+
+    with st.expander("📋 26개 API 수집 순서표", expanded=False):
+        order_df = pd.DataFrame([
+            {"순번": i + 1, "단계": _api_stage_name(k), "API": _seq_label(k), "key": k}
+            for i, k in enumerate(api_keys)
+        ])
+        st.dataframe(order_df, use_container_width=True, hide_index=True)
+
+    col_a, col_b, col_c = st.columns([1, 1, 1])
+    with col_a:
+        step_count = st.selectbox("한 번에 진행", [1, 2, 3, 5], index=0, key=f"seq_step_count_{widget_scope}")
+    with col_b:
+        auto_on = st.toggle("자동 순차 진행", value=True, key=f"seq_auto_on_{widget_scope}")
+    with col_c:
+        refresh_sec = st.selectbox("멈춤방지 새로고침", [5, 10, 15, 30, 60], index=1, key=f"seq_refresh_sec_{widget_scope}")
+
+    b1, b2, b3 = st.columns(3)
+    if b1.button("▶ 다음 API 1개 즉시 진행", key=f"seq_next_{widget_scope}", use_container_width=True):
+        sequential_26api_step(rc_date, meet2, race_no2, 1)
+        st.rerun()
+    if b2.button("⏭ 선택 개수 진행", key=f"seq_multi_{widget_scope}", use_container_width=True):
+        sequential_26api_step(rc_date, meet2, race_no2, int(step_count))
+        st.rerun()
+    if b3.button("🔄 처음부터 다시", key=f"seq_reset_{widget_scope}", use_container_width=True):
+        reset_sequential_26api(rc_date, meet2, race_no2)
+        st.rerun()
+
+    if auto_on and done < total:
+        now_ts = time.time()
+        last_ts_key = f"_seq_last_auto_ts_{widget_scope}"
+        last_ts = float(st.session_state.get(last_ts_key, 0) or 0)
+        if now_ts - last_ts >= 1.5:
+            st.session_state[last_ts_key] = now_ts
+            sequential_26api_step(rc_date, meet2, race_no2, 1)
+            st.rerun()
+        else:
+            st.markdown(f"<meta http-equiv='refresh' content='{int(refresh_sec)}'>", unsafe_allow_html=True)
+
+    if auto_on and done < total:
+        st.markdown(f"<meta http-equiv='refresh' content='{int(refresh_sec)}'>", unsafe_allow_html=True)
+
+    state = _load_seq_state()
+    item = state.get(target, item)
+    rows = item.get("rows", []) if isinstance(item, dict) else []
+    if rows:
+        df = pd.DataFrame(rows)
+        show = [c for c in ["순번", "단계", "API", "key", "행수", "상태", "추천판정", "완료시각", "저장파일"] if c in df.columns]
+        st.dataframe(df[show], use_container_width=True, hide_index=True)
+        try:
+            last_status = str(rows[-1].get("상태", ""))
+            if "HTTP 500" in last_status or "HTTP 404" in last_status or "ERROR" in last_status.upper():
+                st.warning("마지막 API가 오류였지만 실패로 저장하고 다음 API로 넘어가게 되어 있습니다.")
+        except Exception:
+            pass
     else:
         st.caption("아직 수집 기록이 없습니다.")
 
