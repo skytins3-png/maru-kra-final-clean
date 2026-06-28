@@ -1,5 +1,5 @@
 streamlit
 pandas
-umpy
+numpy
 requests
 xlsxwriter

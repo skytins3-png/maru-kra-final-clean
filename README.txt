@@ -1,17 +1,11 @@
-MARU KRA HARD FINAL STABLE
+MARU KRA SEQ STUCK AUTO CONTINUE FIX
 
 수정:
-- 최종 override를 if __main__ 바로 위에 배치해 예전 함수가 덮어쓰는 문제 차단
-- StreamlitDuplicateElementKey reset/selectbox/button 문제 원천 차단
-- datetime.timedelta AttributeError 최종 차단
-- collection_mode NameError 방지
-- use_container_width 경고 방지
-- ArrowTypeError mixed type 표시 경고 방지
-- 오늘 받은 자료만 오늘 보관 유지
-- 결과우선 26개 API 자동 순차수집 유지
+- 26개 API 순차수집이 12/26 같은 중간 지점에서 멈춘 것처럼 보이는 문제 보강
+- 자동 순차 진행 ON이면 화면 렌더링마다 1개 API 진행 후 st.rerun
+- Streamlit 자동 rerun이 막히는 환경 대비 브라우저 meta refresh 추가
+- HTTP 404/500도 실패로 저장하고 다음 API로 계속 진행
+- 수동 버튼: 다음 API 1개 즉시 진행 / 선택 개수 진행 / 처음부터 다시
 
-PC:
-https://maru-kra-final-clean.streamlit.app/?v=hardfinal1
-
-모바일:
-https://maru-kra-final-clean.streamlit.app/?mode=mobile&v=hardfinal1
+적용:
+ZIP 안의 app.py, requirements.txt를 GitHub 루트에 덮어쓰기.

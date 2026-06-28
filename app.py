@@ -4191,7 +4191,7 @@ def render_all_meet_all_race_monitor(rc_date: str, selected: List[str], sim_coun
     if sched.empty:
         st.error("전체 경마장 경주일정을 받지 못했습니다.")
         if isinstance(log_df, pd.DataFrame) and not log_df.empty:
-            st.dataframe(log_df, width="stretch", hide_index=True)
+            st.dataframe(log_df, use_container_width=True, hide_index=True)
         return
 
     try:
@@ -4203,7 +4203,7 @@ def render_all_meet_all_race_monitor(rc_date: str, selected: List[str], sim_coun
     display_cols = [c for c in ["날짜", "경마장", "경주번호", "경주시간", "경주시각"] if c in sched.columns]
     if display_cols:
         st.markdown("#### 오늘 전체 경주일정")
-        st.dataframe(sched[display_cols], width="stretch", hide_index=True, height=360)
+        st.dataframe(sched[display_cols], use_container_width=True, hide_index=True, height=360)
 
     targets = _current_or_next_races(sched, per_meet=3)
     if targets.empty:
@@ -4212,12 +4212,11 @@ def render_all_meet_all_race_monitor(rc_date: str, selected: List[str], sim_coun
 
     st.markdown("#### 현재/다음 점검 대상")
     show_cols = [c for c in ["경마장", "경주번호", "경주시간", "상태"] if c in targets.columns]
-    st.dataframe(targets[show_cols], width="stretch", hide_index=True, height=260)
+    st.dataframe(targets[show_cols], use_container_width=True, hide_index=True, height=260)
 
     render_force_real_collection_center(rc_date, selected, targets)  # FORCE_REAL_COLLECTION_CENTER_ALL_MEET_APPLY
-    render_sequential_26api_center(rc_date, "서울", 1, instance="all_meet")  # SEQUENTIAL_26API_ALL_MEET_APPLY
+    render_sequential_26api_center(rc_date, "서울", 1)  # SEQUENTIAL_26API_ALL_MEET_APPLY
     render_recommendation_after_each_race_center(rc_date, "서울", 1)  # EACH_RACE_RECOMMEND_CENTER_ALL_MEET_APPLY
-    render_today_only_retention_center()  # TODAY_ONLY_RETENTION_CENTER_ALL_MEET_APPLY
 
     st.markdown("#### 경마장별 첫 대상 자동 API 점검")
     result_rows = []
@@ -4250,7 +4249,7 @@ def render_all_meet_all_race_monitor(rc_date: str, selected: List[str], sim_coun
         except Exception as e:
             result_rows.append({"경마장": meet, "오류": str(e)[:120]})
     if result_rows:
-        st.dataframe(pd.DataFrame(result_rows), width="stretch", hide_index=True)
+        st.dataframe(pd.DataFrame(result_rows), use_container_width=True, hide_index=True)
 
     st.info("추천은 서울 1R 고정이 아니라 위 표의 현재/다음 경주를 기준으로 확인합니다. 특정 경주를 깊게 분석하려면 사이드바에서 선택 경마장 모드로 바꾸면 됩니다.")
 
@@ -4338,7 +4337,7 @@ def _source_truth_snapshot(data=None, status_df=None, selected=None, collection_
 
 def render_source_truth_center(data=None, status_df=None, selected=None, collection_mode: str = "") -> None:
     st.markdown("### 🧾 자료 출처 확인센터")
-    snap = _source_truth_snapshot(data, status_df, selected, st.session_state.get("collection_mode", "실시간 API 우선 + 허브 보조"))
+    snap = _source_truth_snapshot(data, status_df, selected, collection_mode)
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("수집모드", snap.get("수집모드", "-")[:12])
     c2.metric("호출대상 API", snap.get("API호출대상수", 0))
@@ -4351,12 +4350,12 @@ def render_source_truth_center(data=None, status_df=None, selected=None, collect
     hub_rows = [{"허브시트/항목": k, "상태": v} for k, v in snap.get("허브상태", {}).items()]
     if hub_rows:
         st.markdown("#### 허브 저장 상태")
-        st.dataframe(pd.DataFrame(hub_rows), width="stretch", hide_index=True, height=220)
+        st.dataframe(pd.DataFrame(hub_rows), use_container_width=True, hide_index=True, height=220)
 
     api_rows = snap.get("API상태", [])
     if api_rows:
         st.markdown("#### API별 직접수신/허브/캐시 출처")
-        st.dataframe(pd.DataFrame(api_rows), width="stretch", hide_index=True, height=360)
+        st.dataframe(pd.DataFrame(api_rows), use_container_width=True, hide_index=True, height=360)
     else:
         st.caption("아직 API 상태표가 없습니다. 수집모드가 허브만 분석이면 API 상태표가 비어 있을 수 있습니다.")
 
@@ -4778,7 +4777,7 @@ def render_no_click_api_excel_viewer(compact: bool = False, meet: str = "서울"
     if isinstance(status, pd.DataFrame) and not status.empty:
         st.markdown("#### API 접속 상태표")
         show_cols = [c for c in ["API", "key", "행수", "상태", "URL"] if c in status.columns]
-        st.dataframe(status[show_cols] if show_cols else status, width="stretch", hide_index=True, height=300 if compact else 420)
+        st.dataframe(status[show_cols] if show_cols else status, use_container_width=True, hide_index=True, height=300 if compact else 420)
     else:
         st.warning("API 상태표가 아직 없습니다.")
 
@@ -4795,7 +4794,7 @@ def render_no_click_api_excel_viewer(compact: bool = False, meet: str = "서울"
                     continue
                 label = dict(API_LABELS).get(key, key) if "API_LABELS" in globals() else key
                 st.markdown(f"**{label} · {len(df)}건**")
-                st.dataframe(df.head(200), width="stretch", hide_index=True, height=260 if compact else 360)
+                st.dataframe(df.head(200), use_container_width=True, hide_index=True, height=260 if compact else 360)
                 shown += 1
                 if compact and shown >= 5:
                     st.caption("모바일에서는 상위 5개 수신자료만 먼저 표시합니다.")
@@ -4966,7 +4965,7 @@ def render_direct_schedule_excel_viewer(compact: bool = False) -> None:
         show_cols = [c for c in ["날짜", "경마장", "경주번호", "경주시간", "경주시각"] if c in sched.columns]
         if not show_cols:
             show_cols = list(sched.columns)[:12]
-        st.dataframe(sched[show_cols], width="stretch", hide_index=True, height=360 if compact else 520)
+        st.dataframe(sched[show_cols], use_container_width=True, hide_index=True, height=360 if compact else 520)
     else:
         st.error("서울·부산경남·제주 경주일정을 직접 받지 못했습니다.")
         st.caption("아래 API 접속 로그에서 HTTP 오류, 0건, 키 오류를 확인하세요.")
@@ -4974,7 +4973,7 @@ def render_direct_schedule_excel_viewer(compact: bool = False) -> None:
     st.markdown("#### API 접속 로그")
     if isinstance(log_df, pd.DataFrame) and not log_df.empty:
         cols = [c for c in ["경마장", "API", "상태", "행수"] if c in log_df.columns]
-        st.dataframe(log_df[cols], width="stretch", hide_index=True, height=260 if compact else 380)
+        st.dataframe(log_df[cols], use_container_width=True, hide_index=True, height=260 if compact else 380)
     else:
         st.info("접속 로그가 없습니다.")
 
@@ -5086,7 +5085,7 @@ def _render_one_api_file_item(item: Dict[str, Any], idx: int, allow_download: bo
             st.markdown("#### 엑셀 뷰어")
             st.dataframe(
                 df,
-                width="stretch",
+                use_container_width=True,
                 hide_index=True,
                 height=360,
             )
@@ -5128,7 +5127,7 @@ def render_api_received_file_viewer(data=None, status_df=None, rc_date: str = ""
     summary_df = pd.DataFrame(files)
     show_cols = [c for c in ["구분", "API", "파일명", "행수", "컬럼수", "저장시각"] if c in summary_df.columns]
     if show_cols:
-        st.dataframe(summary_df[show_cols], width="stretch", hide_index=True, height=220 if compact else 300)
+        st.dataframe(summary_df[show_cols], use_container_width=True, hide_index=True, height=220 if compact else 300)
 
     schedule_files = [x for x in files if str(x.get("구분","")) == "경주일정"]
     status_files = [x for x in files if str(x.get("구분","")) == "상태표"]
@@ -5301,7 +5300,7 @@ def render_api_schedule_visibility_center(status_df=None, data=None) -> None:
     rows = snap.get("rows", [])
     if rows:
         df = pd.DataFrame(rows)
-        st.dataframe(df[["상태", "API", "행수", "메시지"]], width="stretch", hide_index=True)
+        st.dataframe(df[["상태", "API", "행수", "메시지"]], use_container_width=True, hide_index=True)
     else:
         st.warning("API 목록을 찾지 못했습니다.")
 
@@ -6658,7 +6657,7 @@ def render_live_panel(rc_date: str, meet: str, race_no: int, selected: List[str]
     render_api_schedule_visibility_center(st.session_state.get("api_status", pd.DataFrame()), st.session_state.get("live_data", {}))  # PC_API_STATUS_CENTER_RENDER_APPLY
     render_direct_schedule_excel_viewer(compact=False)  # DIRECT_SCHEDULE_VIEWER_PC_APPLY
     render_pipeline_reason_center(rc_date, meet, race_no, compact=False)  # PIPELINE_REASON_CENTER_PC_APPLY
-    render_source_truth_center(st.session_state.get("live_data", {}), st.session_state.get("api_status", pd.DataFrame()), selected, st.session_state.get("collection_mode", "실시간 API 우선 + 허브 보조"))  # SOURCE_TRUTH_CENTER_PC_APPLY
+    render_source_truth_center(st.session_state.get("live_data", {}), st.session_state.get("api_status", pd.DataFrame()), selected, collection_mode)  # SOURCE_TRUTH_CENTER_PC_APPLY
     render_no_click_api_excel_viewer(compact=False, meet=meet)  # NO_CLICK_API_VIEWER_PC_APPLY
     render_excel_detail_workbook_center(st.session_state.get("live_data", {}), st.session_state.get("api_status", pd.DataFrame()), rc_date, meet, race_no, compact=False)  # EXCEL_DETAIL_CENTER_PC_APPLY
     render_api_received_file_viewer(st.session_state.get("live_data", {}), st.session_state.get("api_status", pd.DataFrame()), rc_date, meet, race_no, compact=False)  # PC_API_RECEIVED_FILE_VIEWER_APPLY
@@ -6953,7 +6952,7 @@ def sequential_26api_step(rc_date: str, meet: str, race_no: Any, step_count: int
 
     try:
         if "external_hub_save" in globals():
-            today_only_external_hub_save("sequential_26api_state", item)
+            external_hub_save("sequential_26api_state", item)
     except Exception:
         pass
 
@@ -6974,9 +6973,9 @@ def render_sequential_26api_center(rc_date: str, meet: str, race_no: Any) -> Non
 
     c0, c1, c2 = st.columns([1, 1, 1])
     with c0:
-        step_count = st.selectbox("한 번에 진행", [1, 2, 3, 5], index=0, key=f"old_disabled_seq_api_step_count_{id(object())}")
+        step_count = st.selectbox("한 번에 진행", [1, 2, 3, 5], index=0, key="seq_api_step_count")
     with c1:
-        auto_seq = st.toggle("자동 순차 진행", value=True, key=f"old_disabled_seq_api_auto_run_{id(object())}", help="켜두면 새로고침마다 다음 API를 1개씩 받아 저장합니다.")
+        auto_seq = st.toggle("자동 순차 진행", value=True, key="seq_api_auto_run", help="켜두면 새로고침마다 다음 API를 1개씩 받아 저장합니다.")
     with c2:
         if st.button("처음부터 다시", key="seq_api_reset", width="stretch"):
             reset_sequential_26api(rc_date, meet_run, race_run)
@@ -7013,7 +7012,7 @@ def render_sequential_26api_center(rc_date: str, meet: str, race_no: Any) -> Non
     if rows:
         df = pd.DataFrame(rows)
         show = [c for c in ["순번", "단계", "API", "key", "행수", "상태", "추천판정", "완료시각", "저장파일"] if c in df.columns]
-        st.dataframe(df[show], width="stretch", hide_index=True, height=360)
+        st.dataframe(df[show], use_container_width=True, hide_index=True, height=360)
     else:
         st.info("아직 순차 수집 기록이 없습니다. 자동 순차 진행을 켜거나 새로고침하면 1번 API부터 수집합니다.")
 
@@ -7200,7 +7199,7 @@ def render_force_real_collection_center(rc_date: str, selected: List[str], targe
 
     if isinstance(status, pd.DataFrame) and not status.empty:
         keep = [c for c in ["수집경마장", "수집경주번호", "API", "key", "행수", "상태", "수집방식", "URL"] if c in status.columns]
-        st.dataframe(status[keep] if keep else status, width="stretch", hide_index=True, height=320)
+        st.dataframe(status[keep] if keep else status, use_container_width=True, hide_index=True, height=320)
 
     if isinstance(data, dict) and data:
         with st.expander("받아온 자료 바로보기", expanded=True):
@@ -7212,7 +7211,7 @@ def render_force_real_collection_center(rc_date: str, selected: List[str], targe
                     if df.empty:
                         continue
                     st.markdown(f"**{k} · {len(df)}행**")
-                    st.dataframe(df.head(60), width="stretch", hide_index=True, height=220)
+                    st.dataframe(df.head(60), use_container_width=True, hide_index=True, height=220)
                     shown += 1
                     if shown >= 5:
                         st.caption("화면 속도 때문에 상위 5개 자료만 먼저 표시합니다. 전체는 엑셀 상세자료에서 확인하세요.")
@@ -7307,7 +7306,7 @@ def render_api_hub_panel(status: pd.DataFrame, data: Dict[str, pd.DataFrame]) ->
     with st.expander("API 상태 요약", expanded=True):
         if isinstance(status, pd.DataFrame) and not status.empty:
             keep_cols = [c for c in ["API", "key", "행수", "상태", "URL"] if c in status.columns]
-            st.dataframe(status[keep_cols] if keep_cols else status, width="stretch", height=360)
+            st.dataframe(status[keep_cols] if keep_cols else status, use_container_width=True, height=360)
             try:
                 ok_rows = int((pd.to_numeric(status.get("행수", 0), errors="coerce").fillna(0) > 0).sum())
                 st.caption(f"즉시 상태표 생성됨 · 수신 성공 API {ok_rows}개")
@@ -7325,7 +7324,7 @@ def render_api_hub_panel(status: pd.DataFrame, data: Dict[str, pd.DataFrame]) ->
         h3.metric("현재 데이터", f"{sum(len(v) for v in data.values()) if data else 0:,}행")
         if not local_hub_df.empty:
             show_cols = [c for c in ["저장시각", "경마장", "경주번호", "공격삼쌍승", "방어삼복승", "예상배당", "신뢰도", "추천금액"] if c in local_hub_df.columns]
-            st.dataframe(local_hub_df[show_cols].tail(30) if show_cols else local_hub_df.tail(30), width="stretch", height=330)
+            st.dataframe(local_hub_df[show_cols].tail(30) if show_cols else local_hub_df.tail(30), use_container_width=True, height=330)
         else:
             st.info("허브 저장 데이터가 아직 없습니다.")
 
@@ -7602,7 +7601,7 @@ def build_recommendation_after_each_race(rc_date: str, meet: str, race_no: Any, 
             }
             try:
                 if "external_hub_save" in globals():
-                    today_only_external_hub_save("race_recommend_status", payload)
+                    external_hub_save("race_recommend_status", payload)
             except Exception:
                 pass
             return payload
@@ -7639,8 +7638,8 @@ def build_recommendation_after_each_race(rc_date: str, meet: str, race_no: Any, 
             pass
         try:
             if "external_hub_save" in globals():
-                today_only_external_hub_save("race_recommend_status", result)
-                today_only_external_hub_save("mobile_recommend", result)
+                external_hub_save("race_recommend_status", result)
+                external_hub_save("mobile_recommend", result)
         except Exception:
             pass
         try:
@@ -7661,7 +7660,7 @@ def build_recommendation_after_each_race(rc_date: str, meet: str, race_no: Any, 
         }
         try:
             if "external_hub_save" in globals():
-                today_only_external_hub_save("race_recommend_status", payload)
+                external_hub_save("race_recommend_status", payload)
         except Exception:
             pass
         return payload
@@ -7796,7 +7795,7 @@ def sequential_26api_step(rc_date: str, meet: str, race_no: Any, step_count: int
 
     try:
         if "external_hub_save" in globals():
-            today_only_external_hub_save("sequential_26api_state", item)
+            external_hub_save("sequential_26api_state", item)
     except Exception:
         pass
 
@@ -7814,7 +7813,7 @@ def render_recommendation_after_each_race_center(rc_date: str, meet: str, race_n
     keys = ["안정형대표", "변수형대표", "고배당형대표", "공격삼쌍승", "방어삼복승", "예상배당", "신뢰도", "추천사유"]
     rows = [{"항목": k, "값": rec.get(k, "")} for k in keys if rec.get(k, "") != ""]
     if rows:
-        st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
 
 
@@ -7846,375 +7845,131 @@ def render_file_and_runtime_check_center() -> None:
         checks.append({"검사": "데이터폴더", "상태": "OK" if d.exists() else "WARN", "내용": str(d)})
     except Exception as e:
         checks.append({"검사": "데이터폴더", "상태": "FAIL", "내용": str(e)[:120]})
-    st.dataframe(pd.DataFrame(checks), width="stretch", hide_index=True)
+    st.dataframe(pd.DataFrame(checks), use_container_width=True, hide_index=True)
 
 
 
 
 
-# STREAMLIT_DUPLICATE_KEY_AUTO_SEQ_FIX
-def render_sequential_26api_center(rc_date: str, meet: str, race_no: Any, instance: str = "main") -> None:
-    """26개 API 하나씩 자동 접속→저장→다음 API 진행 센터. 중복 key 오류 방지."""
+# SEQUENTIAL_STUCK_AUTO_CONTINUE_FIX
+def _seq_is_finished(item: Dict[str, Any]) -> bool:
+    try:
+        return bool(item.get("완료")) or int(item.get("index", 0) or 0) >= len(_seq_api_keys())
+    except Exception:
+        return False
+
+def _seq_last_row_status(item: Dict[str, Any]) -> str:
+    try:
+        rows = item.get("rows", []) or []
+        if not rows:
+            return ""
+        return str(rows[-1].get("상태", ""))
+    except Exception:
+        return ""
+
+def render_sequential_26api_center(rc_date: str, meet: str, race_no: Any) -> None:
+    """
+    멈춤 방지 버전.
+    - 자동 순차 진행 ON이면 화면 새로고침 때마다 1개씩 실제 진행
+    - 404/500도 실패로 기록하고 다음 API로 넘어감
+    - 진행중인데 Streamlit이 멈춘 것처럼 보이면 브라우저 meta refresh로 다시 깨움
+    """
     st.markdown("### 🔁 26개 API 자동 순차 수집센터")
-    st.caption("사이드/탭에서 수동 선택하지 않아도 자동으로 1개씩 접속해서 저장하고 다음 API로 넘어갑니다.")
+    st.caption("자동으로 1개씩 접속 → 실패/성공 기록 → 저장 → 다음 API로 진행합니다. 404/500도 멈추지 않고 다음으로 넘어갑니다.")
 
-    meet_run = "서울" if str(meet or "전체") == "전체" else str(meet or "서울")
+    meet2 = "서울" if str(meet or "전체") == "전체" else str(meet or "서울")
     try:
-        race_run = int(float(race_no or 1))
-        if race_run <= 0:
-            race_run = 1
+        race_no2 = int(float(race_no or 1))
+        if race_no2 <= 0:
+            race_no2 = 1
     except Exception:
-        race_run = 1
+        race_no2 = 1
 
-    unique = _safe_file_key("seq", instance, rc_date, meet_run, race_run)
+    target = _seq_target_id(rc_date, meet2, race_no2)
+    state = _load_seq_state()
+    item = state.get(target)
 
-    # 자동 기본값: 한 번에 1개씩. 전체 경마장 화면은 중복 호출 방지를 위해 세션당 1분 1회만.
-    step_count = int(st.session_state.get(f"{unique}_step_count", 1) or 1)
-    st.session_state[f"{unique}_step_count"] = step_count
+    api_keys = _seq_api_keys()
+    if not isinstance(item, dict):
+        reset_sequential_26api(rc_date, meet2, race_no2)
+        state = _load_seq_state()
+        item = state.get(target, {})
 
-    state = _load_seq_state().get(_seq_target_id(rc_date, meet_run, race_run), {})
+    idx = int(item.get("index", 0) or 0)
+    done = min(idx, len(api_keys))
+    total = len(api_keys)
+    rows = item.get("rows", []) if isinstance(item.get("rows", []), list) else []
+    success = sum(1 for r in rows if str(r.get("상태", "")).upper().startswith("OK"))
+    total_rows = sum(int(r.get("행수", 0) or 0) for r in rows)
 
-    # 자동 실행: 완료 전이면 현재 렌더에서 다음 API 1개 수행
-    last_run_key = f"{unique}_last_run_minute"
-    try:
-        now_minute = now_kst().strftime("%Y%m%d%H%M") if "now_kst" in globals() else dt.datetime.now().strftime("%Y%m%d%H%M")
-    except Exception:
-        now_minute = dt.datetime.now().strftime("%Y%m%d%H%M")
+    st.progress(done / max(total, 1), text=f"{done}/{total}개 완료")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("완료 API", f"{done}/{total}")
+    c2.metric("수신 성공", success)
+    c3.metric("총 수신행수", total_rows)
+    c4.metric("상태", "완료" if done >= total else "자동 진행중")
 
-    should_run = not state.get("완료", False)
-    # 같은 화면에 센터가 여러 번 그려져도 같은 분에는 1회만 실행해서 중복 호출 방지
-    if should_run and st.session_state.get(last_run_key) != now_minute:
-        with st.spinner(f"{meet_run} {race_run}R API 자동 순차 수집 중..."):
-            state = sequential_26api_step(rc_date, meet_run, race_run, step_count)
-            st.session_state[last_run_key] = now_minute
+    if done < total:
+        next_key = api_keys[done]
+        st.info(f"다음 수집 예정: {done+1}번 / {_api_stage_name(next_key)} / {_seq_label(next_key)} / `{next_key}`")
     else:
-        state = _load_seq_state().get(_seq_target_id(rc_date, meet_run, race_run), state)
+        st.success("26개 API 순차 수집이 완료되었습니다.")
 
-    api_total = len(_seq_api_keys())
-    done = int(state.get("index", 0) or 0) if isinstance(state, dict) else 0
-    progress = min(1.0, done / max(1, api_total))
-    st.progress(progress, text=f"{done}/{api_total}개 완료")
+    with st.expander("📋 26개 API 수집 순서표", expanded=False):
+        order_df = pd.DataFrame([
+            {"순번": i+1, "단계": _api_stage_name(k), "API": _seq_label(k), "key": k}
+            for i, k in enumerate(api_keys)
+        ])
+        st.dataframe(order_df, use_container_width=True, hide_index=True)
 
-    rows = state.get("rows", []) if isinstance(state, dict) else []
-    ok_count = 0
-    total_rows = 0
-    for r in rows:
-        try:
-            cnt = int(r.get("행수", 0) or 0)
-            total_rows += cnt
-            if cnt > 0:
-                ok_count += 1
-        except Exception:
-            pass
+    col_a, col_b, col_c = st.columns([1,1,1])
+    with col_a:
+        step_count = st.selectbox("한 번에 진행", [1, 2, 3, 5], index=0, key=f"seq_step_count_{target}")
+    with col_b:
+        auto_on = st.toggle("자동 순차 진행", value=True, key=f"seq_auto_on_{target}")
+    with col_c:
+        refresh_sec = st.selectbox("멈춤방지 새로고침", [5, 10, 15, 30, 60], index=1, key=f"seq_refresh_sec_{target}")
 
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("완료 API", f"{done}/{api_total}")
-    m2.metric("수신 성공", ok_count)
-    m3.metric("총 수신행수", total_rows)
-    m4.metric("상태", "완료" if isinstance(state, dict) and state.get("완료") else "자동 진행중")
-
-    # reset button with unique key only
-    if st.button("이 경주 순차수집 처음부터 다시", key=f"{unique}_reset_btn_{id(object())}", width="stretch"):
-        reset_sequential_26api(rc_date, meet_run, race_run)
+    b1, b2, b3 = st.columns(3)
+    if b1.button("▶ 다음 API 1개 즉시 진행", key=f"seq_next_{target}", use_container_width=True):
+        sequential_26api_step(rc_date, meet2, race_no2, 1)
+        st.rerun()
+    if b2.button("⏭ 선택 개수 진행", key=f"seq_multi_{target}", use_container_width=True):
+        sequential_26api_step(rc_date, meet2, race_no2, int(step_count))
+        st.rerun()
+    if b3.button("🔄 처음부터 다시", key=f"seq_reset_{target}", use_container_width=True):
+        reset_sequential_26api(rc_date, meet2, race_no2)
         st.rerun()
 
+    if auto_on and done < total:
+        now_ts = time.time()
+        last_ts_key = f"_seq_last_auto_ts_{target}"
+        last_ts = float(st.session_state.get(last_ts_key, 0) or 0)
+        if now_ts - last_ts >= 1.5:
+            st.session_state[last_ts_key] = now_ts
+            sequential_26api_step(rc_date, meet2, race_no2, 1)
+            st.rerun()
+        else:
+            st.markdown(f"<meta http-equiv='refresh' content='{int(refresh_sec)}'>", unsafe_allow_html=True)
+
+    if auto_on and done < total:
+        st.markdown(f"<meta http-equiv='refresh' content='{int(refresh_sec)}'>", unsafe_allow_html=True)
+
+    state = _load_seq_state()
+    item = state.get(target, item)
+    rows = item.get("rows", []) if isinstance(item, dict) else []
     if rows:
         df = pd.DataFrame(rows)
         show = [c for c in ["순번", "단계", "API", "key", "행수", "상태", "추천판정", "완료시각", "저장파일"] if c in df.columns]
-        st.dataframe(df[show] if show else df, width="stretch", hide_index=True, height=360)
+        st.dataframe(df[show], use_container_width=True, hide_index=True)
+        last_status = _seq_last_row_status(item)
+        if "HTTP 500" in last_status or "HTTP 404" in last_status or "ERROR" in last_status.upper():
+            st.warning("마지막 API가 오류였지만 실패로 저장하고 다음 API로 넘어가게 되어 있습니다.")
     else:
-        st.info("아직 순차 수집 기록이 없습니다. 자동으로 1번 API부터 수집을 시작합니다.")
-
-    if isinstance(state, dict) and state.get("완료"):
-        st.success("26개 API 순차 수집 완료")
-    else:
-        next_idx = done
-        keys = _seq_api_keys()
-        if next_idx < len(keys):
-            st.info(f"다음 수집 예정: {next_idx+1}번 · {_seq_label(keys[next_idx])}")
-
-
-
-
-
-# STREAMLIT_NO_WIDGET_AUTO_SEQ_FINAL_FIX
-def render_sequential_26api_center(rc_date: str, meet: str, race_no: Any, instance: str = "main") -> None:
-    """
-    26개 API 자동 순차 수집센터 최종 안전판.
-    중복 key 오류를 원천 차단하기 위해 이 함수 내부에는 st.button/selectbox/toggle 같은 keyed widget을 두지 않습니다.
-    """
-    st.markdown("### 🔁 26개 API 자동 순차 수집센터")
-    st.caption("수동 버튼 없이 자동으로 1개씩 접속 → 저장 → 다음 API로 진행합니다. 중복키 오류 방지용 안전판입니다.")
-
-    meet_run = "서울" if str(meet or "전체") == "전체" else str(meet or "서울")
-    try:
-        race_run = int(float(race_no or 1))
-        if race_run <= 0:
-            race_run = 1
-    except Exception:
-        race_run = 1
-
-    # 위젯 key가 아니라 session 내부 식별자만 사용
-    unique = _safe_file_key("seq_auto", instance, rc_date, meet_run, race_run)
-    state = _load_seq_state().get(_seq_target_id(rc_date, meet_run, race_run), {})
-
-    try:
-        now_minute = now_kst().strftime("%Y%m%d%H%M") if "now_kst" in globals() else dt.datetime.now().strftime("%Y%m%d%H%M")
-    except Exception:
-        now_minute = dt.datetime.now().strftime("%Y%m%d%H%M")
-
-    last_run_key = f"{unique}_last_run_minute"
-    should_run = not (isinstance(state, dict) and state.get("완료", False))
-
-    # 같은 분에 같은 instance는 1회만 실행. 렌더가 여러 번 되어도 API 중복호출 방지.
-    if should_run and st.session_state.get(last_run_key) != now_minute:
-        with st.spinner(f"{meet_run} {race_run}R API 1개 자동 순차 수집 중..."):
-            state = sequential_26api_step(rc_date, meet_run, race_run, 1)
-            st.session_state[last_run_key] = now_minute
-    else:
-        state = _load_seq_state().get(_seq_target_id(rc_date, meet_run, race_run), state)
-
-    api_total = len(_seq_api_keys())
-    done = int(state.get("index", 0) or 0) if isinstance(state, dict) else 0
-    progress = min(1.0, done / max(1, api_total))
-    st.progress(progress, text=f"{done}/{api_total}개 완료")
-
-    rows = state.get("rows", []) if isinstance(state, dict) else []
-    ok_count = 0
-    total_rows = 0
-    for r in rows:
-        try:
-            cnt = int(r.get("행수", 0) or 0)
-            total_rows += cnt
-            if cnt > 0:
-                ok_count += 1
-        except Exception:
-            pass
-
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("완료 API", f"{done}/{api_total}")
-    m2.metric("수신 성공", ok_count)
-    m3.metric("총 수신행수", total_rows)
-    m4.metric("상태", "완료" if isinstance(state, dict) and state.get("완료") else "자동 진행중")
-
-    if rows:
-        df = pd.DataFrame(rows)
-        show = [c for c in ["순번", "단계", "API", "key", "행수", "상태", "추천판정", "완료시각", "저장파일"] if c in df.columns]
-        st.dataframe(df[show] if show else df, width="stretch", hide_index=True, height=360)
-    else:
-        st.info("아직 순차 수집 기록이 없습니다. 자동으로 1번 API부터 수집을 시작합니다.")
-
-    if isinstance(state, dict) and state.get("완료"):
-        st.success("26개 API 순차 수집 완료")
-    else:
-        keys = _seq_api_keys()
-        if done < len(keys):
-            st.info(f"다음 수집 예정: {done+1}번 · {_seq_label(keys[done])}")
-        st.caption("처음부터 다시 시작하려면 앱 데이터폴더의 sequential_26api_state.json을 삭제하거나 다음 패치의 초기화 전용 화면을 사용하면 됩니다.")
-
-
-
-
-
-# TODAY_ONLY_DATA_RETENTION_FIX
-def _today_only_date() -> str:
-    try:
-        return today_kst() if "today_kst" in globals() else now_kst().strftime("%Y%m%d")
-    except Exception:
-        return dt.datetime.now().strftime("%Y%m%d")
-
-def _looks_like_old_date_path(name: str, today: str) -> bool:
-    """파일/폴더명에 들어간 날짜가 오늘이 아니면 삭제 후보."""
-    text = str(name)
-    dates = re.findall(r"20\d{6}", text)
-    return bool(dates) and all(d != today for d in dates)
-
-def cleanup_old_day_collection_files(today: Optional[str] = None) -> Dict[str, Any]:
-    """
-    영구보존이 아니라 '오늘 자료만 저장' 정책.
-    오늘 날짜가 아닌 순차수집/수신파일/캐시성 파일을 앱 시작 시 정리합니다.
-    """
-    today = today or _today_only_date()
-    result = {"오늘": today, "삭제파일": 0, "삭제폴더": 0, "오류": []}
-    try:
-        base = DATA_DIR if "DATA_DIR" in globals() else Path("maru_kra_data")
-        if not base.exists():
-            return result
-
-        # 날짜별 하위 폴더/파일이 있는 수집 폴더 우선 정리
-        target_dirs = [
-            base / "sequential_api_files",
-            base / "api_received_files",
-            base / "success_api_cache",
-            base / "excel_exports",
-        ]
-        for d in target_dirs:
-            try:
-                if not d.exists():
-                    continue
-                # 오래된 날짜 폴더 삭제
-                for child in d.iterdir():
-                    try:
-                        if _looks_like_old_date_path(child.name, today):
-                            if child.is_dir():
-                                shutil.rmtree(child, ignore_errors=True)
-                                result["삭제폴더"] += 1
-                            elif child.is_file():
-                                child.unlink(missing_ok=True)
-                                result["삭제파일"] += 1
-                    except Exception as e:
-                        result["오류"].append(str(e)[:120])
-            except Exception as e:
-                result["오류"].append(str(e)[:120])
-
-        # 순차 상태 JSON은 오늘 대상만 남김
-        try:
-            p = _seq_state_file() if "_seq_state_file" in globals() else (base / "sequential_26api_state.json")
-            if p.exists():
-                state = json.loads(p.read_text(encoding="utf-8"))
-                if isinstance(state, dict):
-                    new_state = {}
-                    for k, v in state.items():
-                        keep = False
-                        try:
-                            if isinstance(v, dict):
-                                keep = str(v.get("날짜", "")) == today or today in str(k)
-                            else:
-                                keep = today in str(k)
-                        except Exception:
-                            keep = today in str(k)
-                        if keep:
-                            new_state[k] = v
-                    if len(new_state) != len(state):
-                        p.write_text(json.dumps(new_state, ensure_ascii=False, indent=2), encoding="utf-8")
-                        result["삭제파일"] += 1
-        except Exception as e:
-            result["오류"].append(str(e)[:120])
-
-        # live cache가 오래된 날짜 자료면 초기화
-        try:
-            cache_files = [
-                base / "live_cache.pkl",
-                base / "api_status.csv",
-                base / "daily_mobile_plan.json",
-            ]
-            for f in cache_files:
-                if f.exists() and _looks_like_old_date_path(f.name + f.read_text(encoding="utf-8", errors="ignore")[:500] if f.suffix in [".json", ".csv"] else f.name, today):
-                    f.unlink(missing_ok=True)
-                    result["삭제파일"] += 1
-        except Exception:
-            pass
-
-        st.session_state["today_only_cleanup"] = result
-        st.session_state["today_only_cleanup_at"] = now_str() if "now_str" in globals() else str(dt.datetime.now())
-    except Exception as e:
-        result["오류"].append(str(e)[:160])
-    return result
-
-def today_only_external_hub_save(name: str, payload: Any) -> None:
-    """
-    허브 저장도 '오늘 자료' 이름으로 저장.
-    영구 누적이 아니라 오늘자 키로 덮어쓰기/갱신하는 용도.
-    """
-    try:
-        today = _today_only_date()
-        if "external_hub_save" in globals():
-            external_hub_save(f"{name}_{today}", payload)
-            # 현재 조회용 최신 포인터도 오늘 자료로만 갱신
-            external_hub_save(name, {"날짜": today, "오늘자료키": f"{name}_{today}", "갱신시각": now_str() if "now_str" in globals() else str(dt.datetime.now())})
-    except Exception:
-        pass
-
-def render_today_only_retention_center() -> None:
-    st.markdown("### 🗓 오늘 자료 보관 상태")
-    cleanup = st.session_state.get("today_only_cleanup")
-    if not cleanup:
-        cleanup = cleanup_old_day_collection_files(_today_only_date())
-    c1, c2, c3 = st.columns(3)
-    c1.metric("보관 기준일", cleanup.get("오늘", _today_only_date()))
-    c2.metric("정리 파일", cleanup.get("삭제파일", 0))
-    c3.metric("정리 폴더", cleanup.get("삭제폴더", 0))
-    st.info("정책: 영구보존이 아니라 오늘 받은 자료만 보관합니다. 날짜가 바뀌면 어제 수집자료는 자동 정리됩니다.")
-    if cleanup.get("오류"):
-        with st.expander("정리 중 경고", expanded=False):
-            st.write(cleanup.get("오류"))
-
-
-
-
-
-# FINAL_STABLE_LOG_ERROR_CLEANUP_FIX
-def render_sequential_26api_center(rc_date: str, meet: str, race_no: Any, instance: str = "main") -> None:
-    """
-    최종 안정판: 26개 API 자동 순차 수집센터.
-    내부에 Streamlit widget(button/selectbox/toggle)을 두지 않아 DuplicateElementKey를 원천 차단합니다.
-    """
-    st.markdown("### 🔁 26개 API 자동 순차 수집센터")
-    st.caption("자동으로 1개씩 접속 → 오늘 자료 저장 → 다음 API로 진행합니다.")
-
-    meet_run = "서울" if str(meet or "전체") == "전체" else str(meet or "서울")
-    try:
-        race_run = int(float(race_no or 1))
-        if race_run <= 0:
-            race_run = 1
-    except Exception:
-        race_run = 1
-
-    unique = _safe_file_key("seq_auto_final", instance, rc_date, meet_run, race_run)
-    state = _load_seq_state().get(_seq_target_id(rc_date, meet_run, race_run), {})
-
-    try:
-        now_minute = now_kst().strftime("%Y%m%d%H%M") if "now_kst" in globals() else dt.datetime.now().strftime("%Y%m%d%H%M")
-    except Exception:
-        now_minute = dt.datetime.now().strftime("%Y%m%d%H%M")
-
-    last_run_key = f"{unique}_last_run_minute"
-    if not (isinstance(state, dict) and state.get("완료", False)) and st.session_state.get(last_run_key) != now_minute:
-        with st.spinner(f"{meet_run} {race_run}R API 1개 자동 순차 수집 중..."):
-            state = sequential_26api_step(rc_date, meet_run, race_run, 1)
-            st.session_state[last_run_key] = now_minute
-    else:
-        state = _load_seq_state().get(_seq_target_id(rc_date, meet_run, race_run), state)
-
-    api_total = len(_seq_api_keys())
-    done = int(state.get("index", 0) or 0) if isinstance(state, dict) else 0
-    st.progress(min(1.0, done / max(1, api_total)), text=f"{done}/{api_total}개 완료")
-
-    rows = state.get("rows", []) if isinstance(state, dict) else []
-    ok_count = 0
-    total_rows = 0
-    for r in rows:
-        try:
-            cnt = int(r.get("행수", 0) or 0)
-            total_rows += cnt
-            if cnt > 0:
-                ok_count += 1
-        except Exception:
-            pass
-
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("완료 API", f"{done}/{api_total}")
-    m2.metric("수신 성공", ok_count)
-    m3.metric("총 수신행수", total_rows)
-    m4.metric("상태", "완료" if isinstance(state, dict) and state.get("완료") else "자동 진행중")
-
-    if rows:
-        df = pd.DataFrame(rows)
-        show = [c for c in ["순번", "단계", "API", "key", "행수", "상태", "추천판정", "완료시각", "저장파일"] if c in df.columns]
-        st.dataframe(df[show] if show else df, width="stretch", hide_index=True, height=360)
-    else:
-        st.info("아직 순차 수집 기록이 없습니다. 자동으로 1번 API부터 수집을 시작합니다.")
-
-    if isinstance(state, dict) and state.get("완료"):
-        st.success("26개 API 순차 수집 완료")
-    else:
-        keys = _seq_api_keys()
-        if done < len(keys):
-            st.info(f"다음 수집 예정: {done+1}번 · {_seq_label(keys[done])}")
+        st.caption("아직 수집 기록이 없습니다.")
 
 
 def render() -> None:
-    cleanup_old_day_collection_files(_today_only_date())  # TODAY_ONLY_CLEANUP_RENDER_APPLY
     # PC 기본 화면은 기존 그대로 유지합니다.
     # 휴대폰 접속은 URL 파라미터가 없어도 자동으로 모바일 10초 구매 화면으로 분리합니다.
     # PC에서 강제로 모바일을 보려면 ?mode=mobile, 휴대폰에서 PC를 보려면 ?mode=pc 를 사용합니다.
@@ -8237,8 +7992,6 @@ def render() -> None:
     with st.sidebar:
         st.title("🐎 MARU KRA")
         st.success("전체 통합본 · 기존 19개 + 추가 7개 = 26개 API URL 자동내장")
-        st.caption("패치: final-stable-log-cleanup · 오늘자료만 보관 · 26API 자동순차")  # FINAL_STABLE_MARKER_APPLY
-        st.caption("HARD_FINAL_MARKER_20260628 · 중복키/시간오류/Arrow경고 최종정리")
         st.caption("PC 화면은 기존 전체 대시보드 유지")
         st.success(f"외부 모바일 고정주소: {CLOUD_MOBILE_URL}")
         st.link_button("📱 모바일 10초 구매 전용 화면", CLOUD_MOBILE_URL, width="stretch")
@@ -8306,8 +8059,7 @@ def render() -> None:
         st.session_state["race_no"] = race_no
         st.session_state["selected_api_keys"] = selected
         st.caption(f"이번 수집 대상: {len(selected)}/26개 · 모드: {collection_mode}")
-        st.caption("첫 화면은 빠른 핵심 API 우선 수집 · 전체 26개는 상세/엑셀 확인에서 순차 점검")  # FAST_FIRST_SIDEBAR_NOTICE_APPLY
-        st.caption("26개 API 순차수집은 자동 진행 · 수동 선택키 제거")  # AUTO_SEQ_SIDEBAR_NOTICE_APPLY  # IMMEDIATE_API_SESSION_KEYS_APPLY
+        st.caption("첫 화면은 빠른 핵심 API 우선 수집 · 전체 26개는 상세/엑셀 확인에서 순차 점검")  # FAST_FIRST_SIDEBAR_NOTICE_APPLY  # IMMEDIATE_API_SESSION_KEYS_APPLY
         if collection_mode == "허브만 분석":
             st.error("현재 허브만 분석 모드입니다. 이 모드는 공식 API를 호출하지 않습니다. 실전 추천을 받으려면 실시간 API 우선 + 허브 보조로 바꾸세요.")  # HUB_ONLY_MODE_WARNING_APPLY
         if collection_mode == "스마트 자동":
@@ -8356,10 +8108,9 @@ def render() -> None:
         st.success("✅ API URL 26개 자동 탑재 완료: 재입력 없이 호출/ON-OFF만 사용")
         st.info("결과/배당 계열 일부 API는 경주시간 전이면 대기 상태가 정상입니다. 하지만 상태표는 즉시 표시됩니다.")
         render_api_hub_panel(status2, data3)
-        render_sequential_26api_center(rc_date, "서울" if str(meet) == "전체" else meet, 1 if int(race_no or 0) <= 0 else int(race_no), instance="api_tab")  # SEQUENTIAL_26API_TAB_APPLY
+        render_sequential_26api_center(rc_date, "서울" if str(meet) == "전체" else meet, 1 if int(race_no or 0) <= 0 else int(race_no))  # SEQUENTIAL_26API_TAB_APPLY
         render_recommendation_after_each_race_center(rc_date, "서울" if str(meet) == "전체" else meet, 1 if int(race_no or 0) <= 0 else int(race_no))  # EACH_RACE_RECOMMEND_CENTER_TAB_APPLY
         render_file_and_runtime_check_center()  # FILE_RUNTIME_CHECK_TAB_APPLY
-        render_today_only_retention_center()  # TODAY_ONLY_RETENTION_CENTER_TAB_APPLY
     with tab4:
         if st.session_state.get("race_scope") == "전체 경마장 자동":
             render_all_meet_all_race_monitor(rc_date, selected, int(sim_count), risk_mode)
@@ -8432,177 +8183,6 @@ def _current_or_next_races(sched: pd.DataFrame, per_meet: int = 3) -> pd.DataFra
             gg = g.head(per_meet)
         out.append(gg)
     return pd.concat(out, ignore_index=True) if out else pd.DataFrame()
-
-
-
-
-
-# HARD_FINAL_STABLE_OVERRIDE_20260628
-def _safe_display_df(df: Any) -> pd.DataFrame:
-    """Streamlit Arrow conversion warning/error 방지: 화면 표시 전 object 값을 문자열화."""
-    try:
-        if df is None:
-            return pd.DataFrame()
-        if not isinstance(df, pd.DataFrame):
-            df = pd.DataFrame(df)
-        out = df.copy()
-        for col in out.columns:
-            if out[col].dtype == "object":
-                out[col] = out[col].map(lambda x: "" if pd.isna(x) else str(x))
-        return out
-    except Exception:
-        try:
-            return pd.DataFrame(df).astype(str)
-        except Exception:
-            return pd.DataFrame()
-
-def _current_or_next_races(sched: pd.DataFrame, per_meet: int = 3) -> pd.DataFrame:
-    """datetime.timedelta 오류 방지 최종 override."""
-    if sched is None or not isinstance(sched, pd.DataFrame) or sched.empty:
-        return pd.DataFrame()
-    df = sched.copy()
-    dts = []
-    for _, r in df.iterrows():
-        try:
-            dts.append(_parse_schedule_dt_for_monitor(dict(r)))
-        except Exception:
-            dts.append(None)
-    df["_dt"] = pd.to_datetime(dts, errors="coerce")
-    try:
-        now_ts = pd.Timestamp(now_kst() if "now_kst" in globals() else pd.Timestamp.now())
-    except Exception:
-        now_ts = pd.Timestamp.now()
-    statuses = []
-    for x in df["_dt"].tolist():
-        try:
-            if pd.isna(x):
-                statuses.append("시간미확인")
-            else:
-                mins = int((pd.Timestamp(x) - now_ts).total_seconds() // 60)
-                if mins > 25:
-                    statuses.append(f"대기 {mins}분전")
-                elif -20 <= mins <= 25:
-                    statuses.append(f"수집창 {mins}분")
-                elif mins < -20:
-                    statuses.append("종료/결과확인")
-                else:
-                    statuses.append("대기")
-        except Exception:
-            statuses.append("시간미확인")
-    df["상태"] = statuses
-
-    out = []
-    if "경마장" in df.columns:
-        groups = df.groupby("경마장", dropna=False)
-    else:
-        groups = [("전체", df)]
-    for _meet, g in groups:
-        try:
-            future = g[g["_dt"].notna() & (g["_dt"] >= now_ts - pd.Timedelta(minutes=20))]
-            if not future.empty:
-                gg = future.sort_values("_dt").head(per_meet)
-            else:
-                gg = g.sort_values("_dt", na_position="last").tail(per_meet)
-        except Exception:
-            gg = g.head(per_meet)
-        out.append(gg)
-    return pd.concat(out, ignore_index=True) if out else pd.DataFrame()
-
-def render_sequential_26api_center(rc_date: str, meet: str, race_no: Any, instance: str = "main") -> None:
-    """
-    최종 안정판: 위젯 없는 26개 API 자동 순차 수집센터.
-    button/selectbox/toggle 없음 → StreamlitDuplicateElementKey 원천 차단.
-    """
-    st.markdown("### 🔁 26개 API 자동 순차 수집센터")
-    st.caption("자동으로 1개씩 접속 → 오늘 자료 저장 → 다음 API로 진행합니다. 수동 버튼 없음.")
-
-    meet_run = "서울" if str(meet or "전체") == "전체" else str(meet or "서울")
-    try:
-        race_run = int(float(race_no or 1))
-        if race_run <= 0:
-            race_run = 1
-    except Exception:
-        race_run = 1
-
-    unique = _safe_file_key("hard_seq_auto", instance, rc_date, meet_run, race_run)
-    try:
-        state = _load_seq_state().get(_seq_target_id(rc_date, meet_run, race_run), {})
-    except Exception:
-        state = {}
-
-    try:
-        now_minute = now_kst().strftime("%Y%m%d%H%M") if "now_kst" in globals() else dt.datetime.now().strftime("%Y%m%d%H%M")
-    except Exception:
-        now_minute = dt.datetime.now().strftime("%Y%m%d%H%M")
-
-    last_run_key = f"{unique}_last_run_minute"
-    if not (isinstance(state, dict) and state.get("완료", False)) and st.session_state.get(last_run_key) != now_minute:
-        with st.spinner(f"{meet_run} {race_run}R API 1개 자동 순차 수집 중..."):
-            try:
-                state = sequential_26api_step(rc_date, meet_run, race_run, 1)
-                st.session_state[last_run_key] = now_minute
-            except Exception as e:
-                state = state if isinstance(state, dict) else {}
-                st.warning(f"순차 수집 중 오류: {str(e)[:160]}")
-
-    try:
-        api_total = len(_seq_api_keys())
-    except Exception:
-        api_total = 26
-    done = int(state.get("index", 0) or 0) if isinstance(state, dict) else 0
-    st.progress(min(1.0, done / max(1, api_total)), text=f"{done}/{api_total}개 완료")
-
-    rows = state.get("rows", []) if isinstance(state, dict) else []
-    ok_count = 0
-    total_rows = 0
-    for r in rows:
-        try:
-            cnt = int(r.get("행수", 0) or 0)
-            total_rows += cnt
-            if cnt > 0:
-                ok_count += 1
-        except Exception:
-            pass
-
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("완료 API", f"{done}/{api_total}")
-    m2.metric("수신 성공", ok_count)
-    m3.metric("총 수신행수", total_rows)
-    m4.metric("상태", "완료" if isinstance(state, dict) and state.get("완료") else "자동 진행중")
-
-    if rows:
-        df = _safe_display_df(pd.DataFrame(rows))
-        show = [c for c in ["순번", "단계", "API", "key", "행수", "상태", "추천판정", "완료시각", "저장파일"] if c in df.columns]
-        st.dataframe(df[show] if show else df, width="stretch", hide_index=True, height=360)
-    else:
-        st.info("아직 순차 수집 기록이 없습니다. 자동으로 1번 API부터 수집을 시작합니다.")
-
-    if isinstance(state, dict) and state.get("완료"):
-        st.success("26개 API 순차 수집 완료")
-    else:
-        try:
-            keys = _seq_api_keys()
-            if done < len(keys):
-                st.info(f"다음 수집 예정: {done+1}번 · {_seq_label(keys[done])}")
-        except Exception:
-            pass
-
-# st.dataframe 안전 wrapper: Arrow mixed type 경고 최소화
-_ORIG_ST_DATAFRAME_HARD_FINAL = st.dataframe
-def _hard_final_dataframe(data=None, *args, **kwargs):
-    try:
-        if kwargs.get("use_container_width") is True:
-            kwargs.pop("use_container_width", None)
-            kwargs["width"] = "stretch"
-        elif kwargs.get("use_container_width") is False:
-            kwargs.pop("use_container_width", None)
-            kwargs["width"] = "content"
-        if isinstance(data, pd.DataFrame):
-            data = _safe_display_df(data)
-    except Exception:
-        pass
-    return _ORIG_ST_DATAFRAME_HARD_FINAL(data, *args, **kwargs)
-st.dataframe = _hard_final_dataframe
 
 
 if __name__ == "__main__":
