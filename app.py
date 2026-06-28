@@ -8799,6 +8799,115 @@ def _render_sidebar_google_sheet_link() -> None:
         pass
 
 
+
+
+
+# GOOGLE_SHEET_URL_INPUT_AND_NO_BROKEN_DEFAULT_FIX
+def _extract_sheet_id_from_url_or_id(text: str) -> str:
+    text = str(text or "").strip()
+    if not text:
+        return ""
+    m = re.search(r"/spreadsheets/d/([a-zA-Z0-9-_]+)", text)
+    if m:
+        return m.group(1)
+    # raw ID
+    if re.fullmatch(r"[a-zA-Z0-9-_]{20,}", text):
+        return text
+    return ""
+
+def _get_sheet_id_visible() -> str:
+    """
+    우선순위:
+    1) Streamlit Secrets SHEET_ID
+    2) 사용자가 화면에서 붙여넣은 sheet id/url
+    3) 기존 기본값은 참고용으로만 사용
+    """
+    try:
+        try:
+            sid = str(st.secrets.get("SHEET_ID", "") or "").strip()
+            if sid:
+                return sid
+        except Exception:
+            pass
+        sid = str(st.session_state.get("manual_sheet_id", "") or "").strip()
+        if sid:
+            return sid
+        return ""
+    except Exception:
+        return ""
+
+def _get_sheet_url_visible() -> str:
+    sid = _get_sheet_id_visible()
+    if not sid:
+        return ""
+    return f"https://docs.google.com/spreadsheets/d/{sid}/edit"
+
+def render_google_sheet_visible_center() -> None:
+    st.markdown("### 📗 구글시트 허브")
+    st.caption("깨진 주소를 고정하지 않고, Streamlit Secrets의 SHEET_ID 또는 여기에 붙여넣은 실제 구글시트 주소를 사용합니다.")
+
+    try:
+        secret_sid = str(st.secrets.get("SHEET_ID", "") or "").strip()
+    except Exception:
+        secret_sid = ""
+
+    st.markdown("#### 1) 현재 연결값")
+    current_sid = _get_sheet_id_visible()
+    current_url = _get_sheet_url_visible()
+
+    rows = [
+        {"항목": "Secrets SHEET_ID", "상태": "OK" if secret_sid else "없음", "값": secret_sid if secret_sid else "-"},
+        {"항목": "화면 입력 SHEET_ID", "상태": "OK" if st.session_state.get("manual_sheet_id") else "없음", "값": st.session_state.get("manual_sheet_id", "-")},
+        {"항목": "현재 사용 SHEET_ID", "상태": "OK" if current_sid else "없음", "값": current_sid if current_sid else "-"},
+        {"항목": "기본 시트명", "상태": "참고", "값": "MARU_KRA_HUB"},
+    ]
+    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+    st.markdown("#### 2) 실제 구글시트 주소 붙여넣기")
+    raw = st.text_input(
+        "구글시트 주소 또는 SHEET_ID",
+        value=st.session_state.get("manual_sheet_raw", ""),
+        placeholder="https://docs.google.com/spreadsheets/d/실제ID/edit",
+        key="manual_sheet_raw_input",
+    )
+    if st.button("📌 이 주소를 화면 연결값으로 사용", use_container_width=True, key="apply_manual_sheet_id"):
+        sid = _extract_sheet_id_from_url_or_id(raw)
+        if sid:
+            st.session_state["manual_sheet_raw"] = raw
+            st.session_state["manual_sheet_id"] = sid
+            st.success(f"SHEET_ID 적용: {sid}")
+            st.rerun()
+        else:
+            st.error("주소에서 SHEET_ID를 찾지 못했습니다. 구글시트 주소 전체를 다시 붙여넣어 주세요.")
+
+    current_sid = _get_sheet_id_visible()
+    current_url = _get_sheet_url_visible()
+    if current_url:
+        st.code(current_url, language="text")
+        st.link_button("📗 현재 구글시트 열기", current_url, use_container_width=True)
+    else:
+        st.warning("아직 사용할 SHEET_ID가 없습니다. Streamlit Secrets에 SHEET_ID를 넣거나 위 칸에 실제 구글시트 주소를 붙여넣어 주세요.")
+
+    st.markdown("#### 3) 저장 확인")
+    if "render_hub_storage_status_center" in globals():
+        render_hub_storage_status_center()
+    else:
+        st.info("저장 확인센터 함수가 아직 로드되지 않았습니다.")
+
+def _render_sidebar_google_sheet_link() -> None:
+    try:
+        st.sidebar.markdown("---")
+        st.sidebar.markdown("### 📗 구글시트 허브")
+        url = _get_sheet_url_visible()
+        if url:
+            st.sidebar.link_button("현재 구글시트 열기", url, use_container_width=True)
+        else:
+            st.sidebar.caption("SHEET_ID 없음: API/허브 화면에서 실제 주소를 붙여넣으세요.")
+        st.sidebar.caption("잘못된 주소 고정 사용 안 함")
+    except Exception:
+        pass
+
+
 def render() -> None:
     # PC 기본 화면은 기존 그대로 유지합니다.
     # 휴대폰 접속은 URL 파라미터가 없어도 자동으로 모바일 10초 구매 화면으로 분리합니다.
