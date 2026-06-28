@@ -4216,8 +4216,9 @@ def render_all_meet_all_race_monitor(rc_date: str, selected: List[str], sim_coun
     st.dataframe(targets[show_cols], use_container_width=True, hide_index=True, height=260)
 
     render_force_real_collection_center(rc_date, selected, targets)  # FORCE_REAL_COLLECTION_CENTER_ALL_MEET_APPLY
-    render_sequential_26api_center(rc_date, "서울", 1)  # SEQUENTIAL_26API_ALL_MEET_APPLY
-    render_recommendation_after_each_race_center(rc_date, "서울", 1)  # EACH_RACE_RECOMMEND_CENTER_ALL_MEET_APPLY
+    auto_m, auto_r = _auto_current_target_for_recommend(rc_date, "전체", 0)
+    render_sequential_26api_center(rc_date, auto_m, auto_r)  # CURRENT_RACE_TARGET_MATCH_SEQ_ALL_MEET_APPLY
+    render_recommendation_after_each_race_center(rc_date, auto_m, auto_r)  # CURRENT_RACE_TARGET_MATCH_RECOMMEND_ALL_MEET_APPLY
 
     st.markdown("#### 경마장별 첫 대상 자동 API 점검")
     result_rows = []
@@ -7942,7 +7943,7 @@ def render_sequential_26api_center(rc_date: str, meet: str, race_no: Any) -> Non
         reset_sequential_26api(rc_date, meet2, race_no2)
         st.rerun()
 
-    if auto_on and done < total:
+    if auto_on and done < total and not _is_mobile_mode():
         now_ts = time.time()
         last_ts_key = f"_seq_last_auto_ts_{target}"
         last_ts = float(st.session_state.get(last_ts_key, 0) or 0)
@@ -7953,7 +7954,7 @@ def render_sequential_26api_center(rc_date: str, meet: str, race_no: Any) -> Non
         else:
             st.markdown(f"<meta http-equiv='refresh' content='{int(refresh_sec)}'>", unsafe_allow_html=True)
 
-    if auto_on and done < total:
+    if auto_on and done < total and not _is_mobile_mode():
         st.markdown(f"<meta http-equiv='refresh' content='{int(refresh_sec)}'>", unsafe_allow_html=True)
 
     state = _load_seq_state()
@@ -7971,6 +7972,182 @@ def render_sequential_26api_center(rc_date: str, meet: str, race_no: Any) -> Non
 
 
 
+
+
+
+
+
+# CURRENT_RACE_TARGET_MATCH_FIX
+def _safe_int_race_no(x: Any, default: int = 1) -> int:
+    try:
+        v = int(float(x or default))
+        return v if v > 0 else default
+    except Exception:
+        return default
+
+def _auto_current_target_for_recommend(rc_date: str, meet: str = "전체", race_no: Any = 0) -> Tuple[str, int]:
+    """
+    추천/순차수집 대상 경주를 실제 현재/다음 경주 기준으로 맞춥니다.
+    기존 문제: 전체모드에서 서울 1R로 고정되어 실제 더비온 화면 서울 3R과 어긋남.
+    """
+    try:
+        # 사용자가 직접 경주를 골랐으면 그 값을 우선
+        if str(meet) != "전체" and _safe_int_race_no(race_no, 0) > 0:
+            return str(meet), _safe_int_race_no(race_no, 1)
+
+        # 전체모드면 현재/다음 대상표에서 첫 번째 경주 사용
+        if "_load_all_meet_schedule" in globals() and "_current_or_next_races" in globals():
+            sched = _load_all_meet_schedule(rc_date)
+            targets = _current_or_next_races(sched)
+            if isinstance(targets, pd.DataFrame) and not targets.empty:
+                row = targets.iloc[0]
+                m = str(row.get("경마장", row.get("meet", "서울")) or "서울")
+                rn = _safe_int_race_no(row.get("경주번호", row.get("race_no", 1)), 1)
+                return m, rn
+
+        # 세션에 최근 자동 타깃이 있으면 사용
+        t = st.session_state.get("current_auto_target", {}) if "st" in globals() else {}
+        if isinstance(t, dict):
+            m = str(t.get("경마장", t.get("meet", "서울")) or "서울")
+            rn = _safe_int_race_no(t.get("경주번호", t.get("race_no", 1)), 1)
+            return m, rn
+    except Exception:
+        pass
+    return "서울", 1
+
+def _target_warning_if_possible(rc_date: str, meet: str, race_no: Any) -> None:
+    try:
+        m, rn = _auto_current_target_for_recommend(rc_date, meet, race_no)
+        if str(meet) == "전체" or _safe_int_race_no(race_no, 0) <= 0:
+            st.info(f"현재 추천/수집 대상 자동맞춤: {m} {rn}R")
+        elif str(meet) != str(m) or _safe_int_race_no(race_no, 1) != int(rn):
+            st.warning(f"선택 경주와 현재/다음 경주가 다를 수 있습니다. 선택={meet} {race_no}R / 자동감지={m} {rn}R")
+    except Exception:
+        pass
+
+def build_recommendation_after_each_race(rc_date: str, meet: str, race_no: Any, data: Optional[Dict[str, pd.DataFrame]] = None) -> Dict[str, Any]:
+    """
+    매 경기 추천 생성.
+    전체모드/경주번호 0일 때는 절대 서울 1R 고정 추천을 만들지 않고 현재/다음 경주로 맞춤.
+    """
+    auto_meet, auto_race = _auto_current_target_for_recommend(rc_date, meet, race_no)
+    meet = auto_meet
+    race_no = auto_race
+
+    data = data or st.session_state.get("live_data", {}) or {}
+    try:
+        ready, reason = _recommend_ready_from_data(data)
+        if not ready:
+            payload = {
+                "날짜": rc_date,
+                "경마장": meet,
+                "경주번호": int(race_no),
+                "상태": reason,
+                "추천가능": "N",
+                "저장시각": now_str() if "now_str" in globals() else str(dt.datetime.now()),
+            }
+            try:
+                if "external_hub_save" in globals():
+                    external_hub_save("race_recommend_status", payload)
+            except Exception:
+                pass
+            return payload
+
+        env = fetch_weather(meet) if "fetch_weather" in globals() else {}
+        base = build_base_horses(data, rc_date, meet, int(race_no)) if "build_base_horses" in globals() else pd.DataFrame()
+        horses = merge_score_features(base, data, rc_date, meet, int(race_no)) if "merge_score_features" in globals() else base
+
+        # 경주번호 필터 후 말이 3두 미만이면 잘못된 경주 추천으로 보지 않게 차단
+        if isinstance(horses, pd.DataFrame) and len(horses) < 3:
+            payload = {
+                "날짜": rc_date,
+                "경마장": meet,
+                "경주번호": int(race_no),
+                "추천가능": "N",
+                "상태": f"추천 차단: {meet} {race_no}R 기준 말 데이터 {len(horses)}두라 부족",
+                "저장시각": now_str() if "now_str" in globals() else str(dt.datetime.now()),
+            }
+            try:
+                if "external_hub_save" in globals():
+                    external_hub_save("race_recommend_status", payload)
+            except Exception:
+                pass
+            return payload
+
+        sim_count = int(st.session_state.get("sim_count", 1200))
+        risk_mode = st.session_state.get("risk_mode", "균형형")
+        score_df, result, combos = score_and_recommend(horses, env, sim_count, risk_mode) if "score_and_recommend" in globals() else (pd.DataFrame(), {}, [])
+
+        if not isinstance(result, dict):
+            result = {}
+        result.update({
+            "날짜": rc_date,
+            "경마장": meet,
+            "경주번호": int(race_no),
+            "추천가능": "Y",
+            "상태": f"{meet} {race_no}R 추천 생성 완료",
+            "추천사유": reason,
+            "저장시각": now_str() if "now_str" in globals() else str(dt.datetime.now()),
+        })
+
+        try:
+            if "_build_three_type_recommendation" in globals():
+                result = _build_three_type_recommendation(result)
+        except Exception:
+            pass
+
+        try:
+            if "save_mobile_recommend_json" in globals():
+                save_mobile_recommend_json(result)
+        except Exception:
+            pass
+        try:
+            if "external_hub_save" in globals():
+                external_hub_save("race_recommend_status", result)
+                external_hub_save("mobile_recommend", result)
+        except Exception:
+            pass
+        try:
+            st.session_state["latest_each_race_recommend"] = result
+            st.session_state["latest_each_race_score"] = score_df
+            st.session_state["latest_each_race_combos"] = combos
+        except Exception:
+            pass
+        return result
+    except Exception as e:
+        payload = {
+            "날짜": rc_date,
+            "경마장": meet,
+            "경주번호": race_no,
+            "추천가능": "N",
+            "상태": f"추천 생성 오류: {str(e)[:160]}",
+            "저장시각": now_str() if "now_str" in globals() else str(dt.datetime.now()),
+        }
+        try:
+            if "external_hub_save" in globals():
+                external_hub_save("race_recommend_status", payload)
+        except Exception:
+            pass
+        return payload
+
+def render_recommendation_after_each_race_center(rc_date: str, meet: str, race_no: Any) -> None:
+    st.markdown("### 🎯 매 경기 추천 생성 상태")
+    auto_meet, auto_race = _auto_current_target_for_recommend(rc_date, meet, race_no)
+    _target_warning_if_possible(rc_date, meet, race_no)
+
+    rec = st.session_state.get("latest_each_race_recommend", {})
+    if not isinstance(rec, dict) or not rec or str(rec.get("경마장")) != str(auto_meet) or _safe_int_race_no(rec.get("경주번호"), 0) != int(auto_race):
+        rec = build_recommendation_after_each_race(rc_date, auto_meet, auto_race, st.session_state.get("live_data", {}))
+
+    if rec.get("추천가능") == "Y":
+        st.success(f"{rec.get('경마장')} {rec.get('경주번호')}R 추천 생성 완료")
+    else:
+        st.warning(rec.get("상태", "추천 대기"))
+
+    keys = ["경마장", "경주번호", "안정형대표", "변수형대표", "고배당형대표", "공격삼쌍승", "방어삼복승", "예상배당", "신뢰도", "추천사유", "상태"]
+    rows = [{"항목": k, "값": rec.get(k, "")} for k in keys if rec.get(k, "") != ""]
+    if rows:
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
 
 # STREAMLIT_DUPLICATE_WIDGET_KEY_FIX
@@ -8063,7 +8240,7 @@ def render_sequential_26api_center(rc_date: str, meet: str, race_no: Any) -> Non
         reset_sequential_26api(rc_date, meet2, race_no2)
         st.rerun()
 
-    if auto_on and done < total:
+    if auto_on and done < total and not _is_mobile_mode():
         now_ts = time.time()
         last_ts_key = f"_seq_last_auto_ts_{widget_scope}"
         last_ts = float(st.session_state.get(last_ts_key, 0) or 0)
@@ -8074,7 +8251,7 @@ def render_sequential_26api_center(rc_date: str, meet: str, race_no: Any) -> Non
         else:
             st.markdown(f"<meta http-equiv='refresh' content='{int(refresh_sec)}'>", unsafe_allow_html=True)
 
-    if auto_on and done < total:
+    if auto_on and done < total and not _is_mobile_mode():
         st.markdown(f"<meta http-equiv='refresh' content='{int(refresh_sec)}'>", unsafe_allow_html=True)
 
     state = _load_seq_state()
@@ -8092,6 +8269,466 @@ def render_sequential_26api_center(rc_date: str, meet: str, race_no: Any) -> Non
             pass
     else:
         st.caption("아직 수집 기록이 없습니다.")
+
+
+
+
+
+# MOBILE_BLANK_LOOP_SAFE_MODE_FIX
+def _is_mobile_mode() -> bool:
+    try:
+        q = st.query_params
+        return str(q.get("mode", "")).lower() == "mobile"
+    except Exception:
+        return False
+
+def render_mobile_safe_home(rc_date: str = "", meet: str = "전체", race_no: Any = 0) -> None:
+    """
+    모바일 화면 백지 방지용 경량 홈.
+    모바일에서는 26개 API 자동 순차수집/무한 rerun/meta refresh를 직접 돌리지 않고,
+    이미 생성된 추천/허브 추천/세션 추천만 빠르게 보여줍니다.
+    """
+    st.set_page_config(page_title="MARU KRA 모바일", page_icon="🏇", layout="centered")
+    st.markdown("## 🏇 MARU KRA 모바일")
+    st.caption("모바일은 구매 전용 경량 화면입니다. 무거운 26개 API 자동수집은 PC 관리화면에서 돌립니다.")
+
+    auto_meet, auto_race = _auto_current_target_for_recommend(rc_date or (today_kst() if "today_kst" in globals() else ""), meet, race_no)
+    st.info(f"현재/다음 대상: {auto_meet} {auto_race}R")
+
+    rec = st.session_state.get("latest_each_race_recommend", {})
+    if not isinstance(rec, dict) or not rec:
+        try:
+            if "load_mobile_recommend_json" in globals():
+                rec = load_mobile_recommend_json()
+        except Exception:
+            rec = {}
+    if not isinstance(rec, dict):
+        rec = {}
+
+    # 경주번호 안 맞으면 경고만 띄우고 무거운 자동생성은 하지 않음
+    if rec:
+        rmeet = str(rec.get("경마장", rec.get("meet", "")))
+        rrace = _safe_int_race_no(rec.get("경주번호", rec.get("race_no", 0)), 0)
+        if rmeet and (rmeet != str(auto_meet) or rrace != int(auto_race)):
+            st.warning(f"저장 추천은 {rmeet} {rrace}R 기준입니다. 현재/다음 대상 {auto_meet} {auto_race}R과 다를 수 있습니다.")
+    else:
+        st.warning("아직 모바일 추천이 없습니다. PC 관리화면에서 API 수집/추천 생성을 먼저 실행하세요.")
+
+    if rec:
+        title = f"{rec.get('경마장', auto_meet)} {rec.get('경주번호', auto_race)}R 추천"
+        st.success(title)
+        keys = ["안정형대표", "변수형대표", "고배당형대표", "공격삼쌍승", "방어삼복승", "예상배당", "신뢰도", "추천사유", "상태"]
+        for k in keys:
+            v = rec.get(k, "")
+            if v != "":
+                st.markdown(f"**{k}** : `{v}`")
+
+    st.divider()
+    st.link_button("📱 더비온 바로가기", "https://www.derbyon.co.kr", use_container_width=True)
+    st.link_button("🖥 PC 관리화면 열기", "https://maru-kra-final-clean.streamlit.app/?v=hardfinal1", use_container_width=True)
+    st.caption("모바일 백지 방지를 위해 이 화면에서는 자동 rerun을 사용하지 않습니다.")
+
+def _mobile_stop_if_needed(rc_date: str = "", meet: str = "전체", race_no: Any = 0) -> None:
+    if _is_mobile_mode():
+        render_mobile_safe_home(rc_date, meet, race_no)
+        st.stop()
+
+
+
+
+
+# HUB_PC_MOBILE_RECOMMEND_FLOW_FIX
+def _hub_load_latest_recommend() -> Dict[str, Any]:
+    """
+    모바일은 계산하지 않고 허브/저장 추천을 읽습니다.
+    우선순위: external_hub_load(mobile_recommend) → local json → session.
+    """
+    rec = {}
+    try:
+        if "external_hub_load" in globals():
+            x = external_hub_load("mobile_recommend")
+            if isinstance(x, dict):
+                rec = x
+            elif isinstance(x, list) and x:
+                last = x[-1]
+                if isinstance(last, dict):
+                    rec = last
+            elif isinstance(x, pd.DataFrame) and not x.empty:
+                rec = x.tail(1).to_dict("records")[0]
+    except Exception:
+        rec = {}
+    if not rec:
+        try:
+            if "load_mobile_recommend_json" in globals():
+                x = load_mobile_recommend_json()
+                if isinstance(x, dict):
+                    rec = x
+        except Exception:
+            rec = {}
+    if not rec:
+        x = st.session_state.get("latest_each_race_recommend", {})
+        if isinstance(x, dict):
+            rec = x
+    return rec if isinstance(rec, dict) else {}
+
+def _hub_save_pc_confirmed_recommend(rec: Dict[str, Any]) -> bool:
+    """
+    PC에서 생성/확인한 추천을 모바일용 허브에 저장합니다.
+    """
+    if not isinstance(rec, dict) or not rec:
+        return False
+    rec = dict(rec)
+    rec["PC확인"] = "Y"
+    rec["모바일표시"] = "Y"
+    rec["허브저장시각"] = now_str() if "now_str" in globals() else str(dt.datetime.now())
+    ok = False
+    try:
+        if "external_hub_save" in globals():
+            external_hub_save("mobile_recommend", rec)
+            external_hub_save("pc_confirmed_recommend", rec)
+            ok = True
+    except Exception:
+        pass
+    try:
+        if "save_mobile_recommend_json" in globals():
+            save_mobile_recommend_json(rec)
+            ok = True
+    except Exception:
+        pass
+    st.session_state["latest_each_race_recommend"] = rec
+    return ok
+
+def render_pc_hub_recommend_confirm_center(rc_date: str, meet: str, race_no: Any) -> None:
+    """
+    PC는 추천을 생성/검사/확인하고, 확인된 추천을 허브에 저장합니다.
+    모바일은 이 결과만 읽습니다.
+    """
+    st.markdown("### 🧭 PC 확인 → 허브 저장 → 모바일 추천 결과")
+    auto_meet, auto_race = _auto_current_target_for_recommend(rc_date, meet, race_no)
+    rec = st.session_state.get("latest_each_race_recommend", {})
+    if not isinstance(rec, dict) or not rec or str(rec.get("경마장", "")) != str(auto_meet) or _safe_int_race_no(rec.get("경주번호", 0), 0) != int(auto_race):
+        rec = build_recommendation_after_each_race(rc_date, auto_meet, auto_race, st.session_state.get("live_data", {}))
+
+    if rec.get("추천가능") == "Y":
+        st.success(f"PC 추천 확인 대상: {rec.get('경마장')} {rec.get('경주번호')}R")
+    else:
+        st.warning(rec.get("상태", "추천 대기"))
+
+    cols = st.columns(3)
+    if cols[0].button("✅ PC 확인 후 모바일 허브 저장", use_container_width=True, key=f"pc_confirm_save_{auto_meet}_{auto_race}"):
+        ok = _hub_save_pc_confirmed_recommend(rec)
+        if ok:
+            st.success("허브 mobile_recommend에 저장했습니다. 모바일은 이 결과를 읽습니다.")
+        else:
+            st.error("허브 저장 함수가 없거나 저장 실패했습니다. 로컬 저장만 확인하세요.")
+    if cols[1].button("🔄 허브 최신 추천 다시 읽기", use_container_width=True, key=f"pc_reload_hub_{auto_meet}_{auto_race}"):
+        h = _hub_load_latest_recommend()
+        if h:
+            st.session_state["latest_each_race_recommend"] = h
+            st.success("허브 최신 추천을 다시 읽었습니다.")
+            st.rerun()
+        else:
+            st.warning("허브에 읽을 추천이 없습니다.")
+    cols[2].link_button("📱 모바일 결과 보기", "https://maru-kra-final-clean.streamlit.app/?mode=mobile&v=hubflow1", use_container_width=True)
+
+    show_keys = ["경마장", "경주번호", "안정형대표", "변수형대표", "고배당형대표", "예상배당", "신뢰도", "추천사유", "PC확인", "허브저장시각", "상태"]
+    rows = [{"항목": k, "값": rec.get(k, "")} for k in show_keys if rec.get(k, "") != ""]
+    if rows:
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+def render_mobile_safe_home(rc_date: str = "", meet: str = "전체", race_no: Any = 0) -> None:
+    """
+    모바일은 추천을 생성하지 않습니다.
+    허브에 저장된 PC 확인 추천 결과만 보여주는 화면입니다.
+    """
+    st.set_page_config(page_title="MARU KRA 모바일", page_icon="🏇", layout="centered")
+    st.markdown("## 🏇 MARU KRA 모바일 추천결과")
+    st.caption("모바일은 계산/수집 화면이 아니라 PC에서 확인 후 허브에 저장한 추천 결과를 보는 화면입니다.")
+
+    rec = _hub_load_latest_recommend()
+    if not rec:
+        st.warning("허브에 저장된 모바일 추천 결과가 없습니다.")
+        st.info("PC 관리화면에서 API 수집 → 추천 생성 → 'PC 확인 후 모바일 허브 저장'을 먼저 눌러주세요.")
+    else:
+        meet_v = rec.get("경마장", rec.get("meet", ""))
+        race_v = rec.get("경주번호", rec.get("race_no", ""))
+        pc_ok = rec.get("PC확인", "")
+        if pc_ok == "Y":
+            st.success(f"PC 확인 완료 추천: {meet_v} {race_v}R")
+        else:
+            st.warning(f"저장 추천: {meet_v} {race_v}R / PC확인 표시 없음")
+
+        keys = ["안정형대표", "변수형대표", "고배당형대표", "공격삼쌍승", "방어삼복승", "예상배당", "신뢰도", "추천사유", "허브저장시각", "상태"]
+        for k in keys:
+            v = rec.get(k, "")
+            if v != "":
+                st.markdown(f"**{k}** : `{v}`")
+
+    st.divider()
+    st.link_button("📱 더비온 바로가기", "https://www.derbyon.co.kr", use_container_width=True)
+    st.link_button("🖥 PC 관리화면 열기", "https://maru-kra-final-clean.streamlit.app/?v=hubflow1", use_container_width=True)
+    st.caption("모바일에서는 26개 API 자동수집을 돌리지 않아 백지/무한로딩을 막습니다.")
+
+
+
+
+
+# HUB_SHEET_DOUBLE_SAFETY_FLOW_FIX
+def _as_plain_dict(obj: Any) -> Dict[str, Any]:
+    try:
+        if isinstance(obj, dict):
+            return {str(k): (v.item() if hasattr(v, "item") else v) for k, v in obj.items()}
+        if isinstance(obj, pd.DataFrame) and not obj.empty:
+            return obj.tail(1).to_dict("records")[0]
+        if isinstance(obj, list) and obj:
+            last = obj[-1]
+            return last if isinstance(last, dict) else {"value": str(last)}
+    except Exception:
+        pass
+    return {}
+
+def _safe_external_load(name: str) -> Any:
+    try:
+        if "external_hub_load" in globals():
+            return external_hub_load(name)
+    except Exception:
+        return None
+    return None
+
+def _safe_external_save(name: str, payload: Dict[str, Any]) -> Tuple[bool, str]:
+    try:
+        if "external_hub_save" in globals():
+            external_hub_save(name, payload)
+            return True, "허브 저장 호출 OK"
+        return False, "external_hub_save 함수 없음"
+    except Exception as e:
+        return False, f"허브 저장 실패: {str(e)[:160]}"
+
+def _safe_local_save(name: str, payload: Dict[str, Any]) -> Tuple[bool, str]:
+    try:
+        d = DATA_DIR if "DATA_DIR" in globals() else Path("maru_kra_data")
+        d.mkdir(parents=True, exist_ok=True)
+        p = d / f"{name}.json"
+        rows = []
+        if p.exists():
+            try:
+                old = json.loads(p.read_text(encoding="utf-8"))
+                if isinstance(old, list):
+                    rows = old
+                elif isinstance(old, dict):
+                    rows = [old]
+            except Exception:
+                rows = []
+        rows.append(payload)
+        p.write_text(json.dumps(rows[-300:], ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+        return True, str(p)
+    except Exception as e:
+        return False, f"로컬 저장 실패: {str(e)[:160]}"
+
+def _safe_local_load(name: str) -> Any:
+    try:
+        d = DATA_DIR if "DATA_DIR" in globals() else Path("maru_kra_data")
+        p = d / f"{name}.json"
+        if p.exists():
+            x = json.loads(p.read_text(encoding="utf-8"))
+            if isinstance(x, list) and x:
+                return x[-1]
+            return x
+    except Exception:
+        return None
+    return None
+
+def double_safety_save(name: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    이중 안전 저장:
+    1) 허브/구글시트 저장 시도
+    2) 로컬 JSON 백업 저장
+    3) 허브 다시 읽기 확인
+    4) 검증 로그 저장
+    """
+    payload = _as_plain_dict(payload)
+    payload["저장키"] = name
+    payload["저장요청시각"] = now_str() if "now_str" in globals() else str(dt.datetime.now())
+    hub_ok, hub_msg = _safe_external_save(name, payload)
+    local_ok, local_msg = _safe_local_save(name, payload)
+
+    readback = _safe_external_load(name)
+    rb = _as_plain_dict(readback)
+    readback_ok = bool(rb)
+    if not readback_ok:
+        rb = _as_plain_dict(_safe_local_load(name))
+        readback_ok = bool(rb)
+
+    verify = {
+        "저장키": name,
+        "허브저장": "OK" if hub_ok else "FAIL",
+        "허브메시지": hub_msg,
+        "로컬백업": "OK" if local_ok else "FAIL",
+        "로컬메시지": local_msg,
+        "다시읽기": "OK" if readback_ok else "FAIL",
+        "경마장": payload.get("경마장", ""),
+        "경주번호": payload.get("경주번호", ""),
+        "추천": payload.get("안정형대표", payload.get("추천", "")),
+        "검증시각": now_str() if "now_str" in globals() else str(dt.datetime.now()),
+    }
+
+    try:
+        _safe_local_save("hub_sheet_verify_log", verify)
+        if hub_ok:
+            _safe_external_save("hub_sheet_verify_log", verify)
+    except Exception:
+        pass
+
+    st.session_state["last_double_safety_verify"] = verify
+    return verify
+
+def hub_collect_save_analyze_recommend(rc_date: str, meet: str, race_no: Any) -> Dict[str, Any]:
+    """
+    정리된 실제 흐름:
+    허브/공식 API 자료 불러오기 → 허브+로컬 저장 → 분석 → 추천 → 허브+로컬 저장 → 모바일 표시 준비.
+    """
+    auto_meet, auto_race = _auto_current_target_for_recommend(rc_date, meet, race_no)
+    result = {
+        "날짜": rc_date,
+        "경마장": auto_meet,
+        "경주번호": int(auto_race),
+        "시작시각": now_str() if "now_str" in globals() else str(dt.datetime.now()),
+    }
+
+    data = st.session_state.get("live_data", {}) or {}
+    status = st.session_state.get("api_status", pd.DataFrame())
+
+    # 자료가 없으면 현재 대상 1회 수집 시도
+    try:
+        if not data and "fetch_all_live" in globals():
+            data, status = fetch_all_live(rc_date, auto_meet, int(auto_race))
+            st.session_state["live_data"] = data
+            st.session_state["api_status"] = status
+    except Exception as e:
+        result["자료수집오류"] = str(e)[:160]
+
+    # 원자료 저장
+    summary = {}
+    try:
+        for k, df in (data or {}).items():
+            if isinstance(df, pd.DataFrame):
+                summary[k] = int(len(df))
+        raw_payload = dict(result)
+        raw_payload.update({
+            "자료키수": len(summary),
+            "총수신행수": int(sum(summary.values())),
+            "API별행수": json.dumps(summary, ensure_ascii=False),
+        })
+        raw_verify = double_safety_save("raw_collection_summary", raw_payload)
+        result["원자료저장검증"] = raw_verify
+    except Exception as e:
+        result["원자료저장오류"] = str(e)[:160]
+
+    # 분석/추천
+    try:
+        rec = build_recommendation_after_each_race(rc_date, auto_meet, int(auto_race), data)
+        if not isinstance(rec, dict):
+            rec = {}
+        rec["경마장"] = auto_meet
+        rec["경주번호"] = int(auto_race)
+        rec["분석완료시각"] = now_str() if "now_str" in globals() else str(dt.datetime.now())
+        rec["모바일표시"] = "Y"
+        rec["추천출처"] = "허브자료_분석추천"
+        rec_verify = double_safety_save("mobile_recommend", rec)
+        double_safety_save("analysis_recommend_log", rec)
+        result["추천"] = rec
+        result["추천저장검증"] = rec_verify
+        st.session_state["latest_each_race_recommend"] = rec
+    except Exception as e:
+        result["추천오류"] = str(e)[:160]
+
+    double_safety_save("hub_pipeline_run_log", result)
+    return result
+
+def render_hub_storage_status_center() -> None:
+    st.markdown("### 🧾 허브/구글시트 저장 확인센터")
+    keys = [
+        "raw_collection_summary",
+        "analysis_recommend_log",
+        "mobile_recommend",
+        "pc_confirmed_recommend",
+        "hub_pipeline_run_log",
+        "hub_sheet_verify_log",
+    ]
+    rows = []
+    for k in keys:
+        obj = _safe_external_load(k)
+        d = _as_plain_dict(obj)
+        source = "허브/구글시트"
+        if not d:
+            obj = _safe_local_load(k)
+            d = _as_plain_dict(obj)
+            source = "로컬백업"
+        rows.append({
+            "저장항목": k,
+            "확인": "OK" if d else "없음",
+            "출처": source if d else "-",
+            "경마장": d.get("경마장", ""),
+            "경주번호": d.get("경주번호", ""),
+            "저장/검증시각": d.get("허브저장시각", d.get("검증시각", d.get("저장요청시각", d.get("분석완료시각", "")))),
+            "추천": d.get("안정형대표", d.get("추천", "")),
+        })
+    df = pd.DataFrame(rows)
+    st.dataframe(df, use_container_width=True, hide_index=True)
+
+    last = st.session_state.get("last_double_safety_verify", {})
+    if isinstance(last, dict) and last:
+        if last.get("허브저장") == "OK" and last.get("로컬백업") == "OK" and last.get("다시읽기") == "OK":
+            st.success("마지막 저장 검증: 허브 저장 + 로컬 백업 + 다시읽기 OK")
+        else:
+            st.warning(f"마지막 저장 검증 확인 필요: {last}")
+
+def render_hub_pipeline_control_center(rc_date: str, meet: str, race_no: Any) -> None:
+    st.markdown("### 🔐 허브 자료 저장·분석·추천 이중 안전장치")
+    st.caption("허브/구글시트와 로컬백업에 동시에 저장하고, 다시 읽어서 저장 여부를 화면에 보여줍니다.")
+    auto_meet, auto_race = _auto_current_target_for_recommend(rc_date, meet, race_no)
+    st.info(f"대상 경주: {auto_meet} {auto_race}R")
+
+    c1, c2, c3 = st.columns(3)
+    if c1.button("① 허브자료 저장+분석+모바일추천", use_container_width=True, key=f"hub_pipeline_run_{auto_meet}_{auto_race}"):
+        run = hub_collect_save_analyze_recommend(rc_date, auto_meet, int(auto_race))
+        st.session_state["last_hub_pipeline_run"] = run
+        st.success("허브 저장/분석/추천 파이프라인 실행 완료")
+        st.rerun()
+    if c2.button("② 저장 여부 다시 확인", use_container_width=True, key=f"hub_storage_check_{auto_meet}_{auto_race}"):
+        st.session_state["force_show_hub_storage"] = True
+    c3.link_button("③ 모바일 추천결과 보기", "https://maru-kra-final-clean.streamlit.app/?mode=mobile&v=hubdual1", use_container_width=True)
+
+    render_hub_storage_status_center()
+
+def render_mobile_safe_home(rc_date: str = "", meet: str = "전체", race_no: Any = 0) -> None:
+    """
+    모바일 최종 역할:
+    허브/구글시트에 저장된 mobile_recommend만 표시.
+    모바일에서 자료수집/분석은 하지 않습니다.
+    """
+    st.set_page_config(page_title="MARU KRA 모바일", page_icon="🏇", layout="centered")
+    st.markdown("## 🏇 MARU KRA 모바일 추천결과")
+    st.caption("허브/구글시트에 저장된 최종 추천만 보여줍니다.")
+
+    rec = _hub_load_latest_recommend()
+    if not rec:
+        st.warning("허브/구글시트에 저장된 mobile_recommend가 없습니다.")
+        st.info("PC에서 '허브자료 저장+분석+모바일추천'을 먼저 실행하세요.")
+    else:
+        meet_v = rec.get("경마장", "")
+        race_v = rec.get("경주번호", "")
+        st.success(f"최종 추천: {meet_v} {race_v}R")
+        keys = ["안정형대표", "변수형대표", "고배당형대표", "공격삼쌍승", "방어삼복승", "예상배당", "신뢰도", "추천사유", "추천출처", "분석완료시각", "허브저장시각", "상태"]
+        for k in keys:
+            v = rec.get(k, "")
+            if v != "":
+                st.markdown(f"**{k}** : `{v}`")
+
+    st.divider()
+    st.link_button("📱 더비온 바로가기", "https://www.derbyon.co.kr", use_container_width=True)
+    st.link_button("🖥 PC 관리화면 열기", "https://maru-kra-final-clean.streamlit.app/?v=hubdual1", use_container_width=True)
+    st.caption("모바일은 확인 전용입니다. 수집/분석/저장은 PC와 허브에서 처리합니다.")
 
 
 def render() -> None:
@@ -8233,8 +8870,11 @@ def render() -> None:
         st.success("✅ API URL 26개 자동 탑재 완료: 재입력 없이 호출/ON-OFF만 사용")
         st.info("결과/배당 계열 일부 API는 경주시간 전이면 대기 상태가 정상입니다. 하지만 상태표는 즉시 표시됩니다.")
         render_api_hub_panel(status2, data3)
-        render_sequential_26api_center(rc_date, "서울" if str(meet) == "전체" else meet, 1 if int(race_no or 0) <= 0 else int(race_no))  # SEQUENTIAL_26API_TAB_APPLY
-        render_recommendation_after_each_race_center(rc_date, "서울" if str(meet) == "전체" else meet, 1 if int(race_no or 0) <= 0 else int(race_no))  # EACH_RACE_RECOMMEND_CENTER_TAB_APPLY
+        tab_m, tab_r = _auto_current_target_for_recommend(rc_date, meet, race_no)
+        render_sequential_26api_center(rc_date, tab_m, tab_r)  # CURRENT_RACE_TARGET_MATCH_SEQ_TAB_APPLY
+        render_recommendation_after_each_race_center(rc_date, tab_m, tab_r)  # CURRENT_RACE_TARGET_MATCH_RECOMMEND_TAB_APPLY
+        render_pc_hub_recommend_confirm_center(rc_date, tab_m if "tab_m" in locals() else meet, tab_r if "tab_r" in locals() else race_no)  # HUB_PC_MOBILE_RECOMMEND_FLOW_TAB_APPLY
+        render_hub_pipeline_control_center(rc_date, tab_m if 'tab_m' in locals() else meet, tab_r if 'tab_r' in locals() else race_no)  # HUB_SHEET_DOUBLE_SAFETY_FLOW_TAB_APPLY
         render_file_and_runtime_check_center()  # FILE_RUNTIME_CHECK_TAB_APPLY
     with tab4:
         if st.session_state.get("race_scope") == "전체 경마장 자동":

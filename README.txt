@@ -1,10 +1,17 @@
-MARU KRA DUPLICATE KEY SEQ FIX
+MARU KRA HUB SHEET DOUBLE SAFETY FLOW FIX
 
-수정:
-- StreamlitDuplicateElementKey: seq_step_count_* 중복 오류 해결
-- 같은 26개 API 순차수집센터가 한 화면에서 두 번 호출되어도 위젯 key가 겹치지 않게 caller line number를 key에 추가
-- 기존 멈춤방지 자동 진행 유지
-- HTTP 404/500은 실패 저장 후 다음 API 진행 유지
+최종 흐름:
+1. 허브/공식 API 자료 불러오기
+2. 원자료 요약을 허브/구글시트 + 로컬 JSON에 이중 저장
+3. 저장 후 다시 읽기 검증
+4. 분석/추천 생성
+5. 추천 결과를 mobile_recommend로 허브/구글시트 + 로컬 JSON 이중 저장
+6. 모바일은 mobile_recommend만 표시
+7. PC 화면에서 저장 여부 확인센터로 허브 저장 상태 확인
 
-적용:
-ZIP 안의 app.py, requirements.txt를 GitHub 루트에 덮어쓰기.
+추가 화면:
+- 허브 자료 저장·분석·추천 이중 안전장치
+- 허브/구글시트 저장 확인센터
+
+주의:
+- 자동구매/자동결제 없음. 추천 결과 확인 및 수동 구매 참고용.
