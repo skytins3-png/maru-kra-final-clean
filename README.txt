@@ -1,15 +1,15 @@
-MARU KRA DUPKEY AUTO SEQ FIX
+MARU KRA TODAY ONLY RETENTION FIX
 
 수정:
-- StreamlitDuplicateElementKey: seq_api_step_count 오류 수정
-- 순차수집센터의 selectbox/toggle 수동키 제거
-- 26개 API 순차수집은 자동으로 1개씩 진행
-- 같은 화면/탭에 여러 번 표시되어도 unique instance key 사용
-- 같은 분에 중복 API 호출하지 않도록 방지
-- 결과우선 26API 순서와 매경기 추천 기능 유지
+- 영구보존이 아니라 오늘 받은 자료만 보관
+- 앱 시작 시 오늘 날짜가 아닌 순차수집/수신파일/캐시성 자료 자동 정리
+- sequential_26api_state도 오늘 날짜 기록만 유지
+- 허브 저장은 오늘 날짜 키로 저장하고 최신 포인터만 갱신
+- 오늘 자료 보관 상태 화면 추가
+- 노위젯 자동순차/결과우선 26API/매경기 추천 유지
 
 모바일:
-https://maru-kra-final-clean.streamlit.app/?mode=mobile&v=autoseqfix1
+https://maru-kra-final-clean.streamlit.app/?mode=mobile&v=todayonly1
 
 PC:
-https://maru-kra-final-clean.streamlit.app/?v=autoseqfix1
+https://maru-kra-final-clean.streamlit.app/?v=todayonly1

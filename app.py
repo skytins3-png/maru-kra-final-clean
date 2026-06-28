@@ -4217,6 +4217,7 @@ def render_all_meet_all_race_monitor(rc_date: str, selected: List[str], sim_coun
     render_force_real_collection_center(rc_date, selected, targets)  # FORCE_REAL_COLLECTION_CENTER_ALL_MEET_APPLY
     render_sequential_26api_center(rc_date, "서울", 1, instance="all_meet")  # SEQUENTIAL_26API_ALL_MEET_APPLY
     render_recommendation_after_each_race_center(rc_date, "서울", 1)  # EACH_RACE_RECOMMEND_CENTER_ALL_MEET_APPLY
+    render_today_only_retention_center()  # TODAY_ONLY_RETENTION_CENTER_ALL_MEET_APPLY
 
     st.markdown("#### 경마장별 첫 대상 자동 API 점검")
     result_rows = []
@@ -6952,7 +6953,7 @@ def sequential_26api_step(rc_date: str, meet: str, race_no: Any, step_count: int
 
     try:
         if "external_hub_save" in globals():
-            external_hub_save("sequential_26api_state", item)
+            today_only_external_hub_save("sequential_26api_state", item)
     except Exception:
         pass
 
@@ -7601,7 +7602,7 @@ def build_recommendation_after_each_race(rc_date: str, meet: str, race_no: Any, 
             }
             try:
                 if "external_hub_save" in globals():
-                    external_hub_save("race_recommend_status", payload)
+                    today_only_external_hub_save("race_recommend_status", payload)
             except Exception:
                 pass
             return payload
@@ -7638,8 +7639,8 @@ def build_recommendation_after_each_race(rc_date: str, meet: str, race_no: Any, 
             pass
         try:
             if "external_hub_save" in globals():
-                external_hub_save("race_recommend_status", result)
-                external_hub_save("mobile_recommend", result)
+                today_only_external_hub_save("race_recommend_status", result)
+                today_only_external_hub_save("mobile_recommend", result)
         except Exception:
             pass
         try:
@@ -7660,7 +7661,7 @@ def build_recommendation_after_each_race(rc_date: str, meet: str, race_no: Any, 
         }
         try:
             if "external_hub_save" in globals():
-                external_hub_save("race_recommend_status", payload)
+                today_only_external_hub_save("race_recommend_status", payload)
         except Exception:
             pass
         return payload
@@ -7795,7 +7796,7 @@ def sequential_26api_step(rc_date: str, meet: str, race_no: Any, step_count: int
 
     try:
         if "external_hub_save" in globals():
-            external_hub_save("sequential_26api_state", item)
+            today_only_external_hub_save("sequential_26api_state", item)
     except Exception:
         pass
 
@@ -7933,7 +7934,214 @@ def render_sequential_26api_center(rc_date: str, meet: str, race_no: Any, instan
             st.info(f"다음 수집 예정: {next_idx+1}번 · {_seq_label(keys[next_idx])}")
 
 
+
+
+
+# STREAMLIT_NO_WIDGET_AUTO_SEQ_FINAL_FIX
+def render_sequential_26api_center(rc_date: str, meet: str, race_no: Any, instance: str = "main") -> None:
+    """
+    26개 API 자동 순차 수집센터 최종 안전판.
+    중복 key 오류를 원천 차단하기 위해 이 함수 내부에는 st.button/selectbox/toggle 같은 keyed widget을 두지 않습니다.
+    """
+    st.markdown("### 🔁 26개 API 자동 순차 수집센터")
+    st.caption("수동 버튼 없이 자동으로 1개씩 접속 → 저장 → 다음 API로 진행합니다. 중복키 오류 방지용 안전판입니다.")
+
+    meet_run = "서울" if str(meet or "전체") == "전체" else str(meet or "서울")
+    try:
+        race_run = int(float(race_no or 1))
+        if race_run <= 0:
+            race_run = 1
+    except Exception:
+        race_run = 1
+
+    # 위젯 key가 아니라 session 내부 식별자만 사용
+    unique = _safe_file_key("seq_auto", instance, rc_date, meet_run, race_run)
+    state = _load_seq_state().get(_seq_target_id(rc_date, meet_run, race_run), {})
+
+    try:
+        now_minute = now_kst().strftime("%Y%m%d%H%M") if "now_kst" in globals() else dt.datetime.now().strftime("%Y%m%d%H%M")
+    except Exception:
+        now_minute = dt.datetime.now().strftime("%Y%m%d%H%M")
+
+    last_run_key = f"{unique}_last_run_minute"
+    should_run = not (isinstance(state, dict) and state.get("완료", False))
+
+    # 같은 분에 같은 instance는 1회만 실행. 렌더가 여러 번 되어도 API 중복호출 방지.
+    if should_run and st.session_state.get(last_run_key) != now_minute:
+        with st.spinner(f"{meet_run} {race_run}R API 1개 자동 순차 수집 중..."):
+            state = sequential_26api_step(rc_date, meet_run, race_run, 1)
+            st.session_state[last_run_key] = now_minute
+    else:
+        state = _load_seq_state().get(_seq_target_id(rc_date, meet_run, race_run), state)
+
+    api_total = len(_seq_api_keys())
+    done = int(state.get("index", 0) or 0) if isinstance(state, dict) else 0
+    progress = min(1.0, done / max(1, api_total))
+    st.progress(progress, text=f"{done}/{api_total}개 완료")
+
+    rows = state.get("rows", []) if isinstance(state, dict) else []
+    ok_count = 0
+    total_rows = 0
+    for r in rows:
+        try:
+            cnt = int(r.get("행수", 0) or 0)
+            total_rows += cnt
+            if cnt > 0:
+                ok_count += 1
+        except Exception:
+            pass
+
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("완료 API", f"{done}/{api_total}")
+    m2.metric("수신 성공", ok_count)
+    m3.metric("총 수신행수", total_rows)
+    m4.metric("상태", "완료" if isinstance(state, dict) and state.get("완료") else "자동 진행중")
+
+    if rows:
+        df = pd.DataFrame(rows)
+        show = [c for c in ["순번", "단계", "API", "key", "행수", "상태", "추천판정", "완료시각", "저장파일"] if c in df.columns]
+        st.dataframe(df[show] if show else df, use_container_width=True, hide_index=True, height=360)
+    else:
+        st.info("아직 순차 수집 기록이 없습니다. 자동으로 1번 API부터 수집을 시작합니다.")
+
+    if isinstance(state, dict) and state.get("완료"):
+        st.success("26개 API 순차 수집 완료")
+    else:
+        keys = _seq_api_keys()
+        if done < len(keys):
+            st.info(f"다음 수집 예정: {done+1}번 · {_seq_label(keys[done])}")
+        st.caption("처음부터 다시 시작하려면 앱 데이터폴더의 sequential_26api_state.json을 삭제하거나 다음 패치의 초기화 전용 화면을 사용하면 됩니다.")
+
+
+
+
+
+# TODAY_ONLY_DATA_RETENTION_FIX
+def _today_only_date() -> str:
+    try:
+        return today_kst() if "today_kst" in globals() else now_kst().strftime("%Y%m%d")
+    except Exception:
+        return dt.datetime.now().strftime("%Y%m%d")
+
+def _looks_like_old_date_path(name: str, today: str) -> bool:
+    """파일/폴더명에 들어간 날짜가 오늘이 아니면 삭제 후보."""
+    text = str(name)
+    dates = re.findall(r"20\d{6}", text)
+    return bool(dates) and all(d != today for d in dates)
+
+def cleanup_old_day_collection_files(today: Optional[str] = None) -> Dict[str, Any]:
+    """
+    영구보존이 아니라 '오늘 자료만 저장' 정책.
+    오늘 날짜가 아닌 순차수집/수신파일/캐시성 파일을 앱 시작 시 정리합니다.
+    """
+    today = today or _today_only_date()
+    result = {"오늘": today, "삭제파일": 0, "삭제폴더": 0, "오류": []}
+    try:
+        base = DATA_DIR if "DATA_DIR" in globals() else Path("maru_kra_data")
+        if not base.exists():
+            return result
+
+        # 날짜별 하위 폴더/파일이 있는 수집 폴더 우선 정리
+        target_dirs = [
+            base / "sequential_api_files",
+            base / "api_received_files",
+            base / "success_api_cache",
+            base / "excel_exports",
+        ]
+        for d in target_dirs:
+            try:
+                if not d.exists():
+                    continue
+                # 오래된 날짜 폴더 삭제
+                for child in d.iterdir():
+                    try:
+                        if _looks_like_old_date_path(child.name, today):
+                            if child.is_dir():
+                                shutil.rmtree(child, ignore_errors=True)
+                                result["삭제폴더"] += 1
+                            elif child.is_file():
+                                child.unlink(missing_ok=True)
+                                result["삭제파일"] += 1
+                    except Exception as e:
+                        result["오류"].append(str(e)[:120])
+            except Exception as e:
+                result["오류"].append(str(e)[:120])
+
+        # 순차 상태 JSON은 오늘 대상만 남김
+        try:
+            p = _seq_state_file() if "_seq_state_file" in globals() else (base / "sequential_26api_state.json")
+            if p.exists():
+                state = json.loads(p.read_text(encoding="utf-8"))
+                if isinstance(state, dict):
+                    new_state = {}
+                    for k, v in state.items():
+                        keep = False
+                        try:
+                            if isinstance(v, dict):
+                                keep = str(v.get("날짜", "")) == today or today in str(k)
+                            else:
+                                keep = today in str(k)
+                        except Exception:
+                            keep = today in str(k)
+                        if keep:
+                            new_state[k] = v
+                    if len(new_state) != len(state):
+                        p.write_text(json.dumps(new_state, ensure_ascii=False, indent=2), encoding="utf-8")
+                        result["삭제파일"] += 1
+        except Exception as e:
+            result["오류"].append(str(e)[:120])
+
+        # live cache가 오래된 날짜 자료면 초기화
+        try:
+            cache_files = [
+                base / "live_cache.pkl",
+                base / "api_status.csv",
+                base / "daily_mobile_plan.json",
+            ]
+            for f in cache_files:
+                if f.exists() and _looks_like_old_date_path(f.name + f.read_text(encoding="utf-8", errors="ignore")[:500] if f.suffix in [".json", ".csv"] else f.name, today):
+                    f.unlink(missing_ok=True)
+                    result["삭제파일"] += 1
+        except Exception:
+            pass
+
+        st.session_state["today_only_cleanup"] = result
+        st.session_state["today_only_cleanup_at"] = now_str() if "now_str" in globals() else str(dt.datetime.now())
+    except Exception as e:
+        result["오류"].append(str(e)[:160])
+    return result
+
+def today_only_external_hub_save(name: str, payload: Any) -> None:
+    """
+    허브 저장도 '오늘 자료' 이름으로 저장.
+    영구 누적이 아니라 오늘자 키로 덮어쓰기/갱신하는 용도.
+    """
+    try:
+        today = _today_only_date()
+        if "external_hub_save" in globals():
+            external_hub_save(f"{name}_{today}", payload)
+            # 현재 조회용 최신 포인터도 오늘 자료로만 갱신
+            external_hub_save(name, {"날짜": today, "오늘자료키": f"{name}_{today}", "갱신시각": now_str() if "now_str" in globals() else str(dt.datetime.now())})
+    except Exception:
+        pass
+
+def render_today_only_retention_center() -> None:
+    st.markdown("### 🗓 오늘 자료 보관 상태")
+    cleanup = st.session_state.get("today_only_cleanup")
+    if not cleanup:
+        cleanup = cleanup_old_day_collection_files(_today_only_date())
+    c1, c2, c3 = st.columns(3)
+    c1.metric("보관 기준일", cleanup.get("오늘", _today_only_date()))
+    c2.metric("정리 파일", cleanup.get("삭제파일", 0))
+    c3.metric("정리 폴더", cleanup.get("삭제폴더", 0))
+    st.info("정책: 영구보존이 아니라 오늘 받은 자료만 보관합니다. 날짜가 바뀌면 어제 수집자료는 자동 정리됩니다.")
+    if cleanup.get("오류"):
+        with st.expander("정리 중 경고", expanded=False):
+            st.write(cleanup.get("오류"))
+
+
 def render() -> None:
+    cleanup_old_day_collection_files(_today_only_date())  # TODAY_ONLY_CLEANUP_RENDER_APPLY
     # PC 기본 화면은 기존 그대로 유지합니다.
     # 휴대폰 접속은 URL 파라미터가 없어도 자동으로 모바일 10초 구매 화면으로 분리합니다.
     # PC에서 강제로 모바일을 보려면 ?mode=mobile, 휴대폰에서 PC를 보려면 ?mode=pc 를 사용합니다.
@@ -8076,6 +8284,7 @@ def render() -> None:
         render_sequential_26api_center(rc_date, "서울" if str(meet) == "전체" else meet, 1 if int(race_no or 0) <= 0 else int(race_no), instance="api_tab")  # SEQUENTIAL_26API_TAB_APPLY
         render_recommendation_after_each_race_center(rc_date, "서울" if str(meet) == "전체" else meet, 1 if int(race_no or 0) <= 0 else int(race_no))  # EACH_RACE_RECOMMEND_CENTER_TAB_APPLY
         render_file_and_runtime_check_center()  # FILE_RUNTIME_CHECK_TAB_APPLY
+        render_today_only_retention_center()  # TODAY_ONLY_RETENTION_CENTER_TAB_APPLY
     with tab4:
         if st.session_state.get("race_scope") == "전체 경마장 자동":
             render_all_meet_all_race_monitor(rc_date, selected, int(sim_count), risk_mode)
