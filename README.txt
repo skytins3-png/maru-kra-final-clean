@@ -1,12 +1,8 @@
-MARU KRA GOOGLE SHEET URL INPUT FIX
+MARU KRA API PREFETCH REALTIME PRIORITY 26 FIX
 
-수정:
-- 깨진 구글시트 주소를 기본 링크로 고정하지 않음
-- Streamlit Secrets의 SHEET_ID를 우선 사용
-- PC 화면에서 실제 구글시트 주소/SHEET_ID를 붙여넣어 화면 연결값으로 사용할 수 있음
-- 사이드바 구글시트 버튼도 현재 연결값 기준으로 표시
-- 저장 확인센터 유지
-
-주의:
-- 앱 화면 입력값은 화면 연결 표시용입니다.
-- 실제 구글시트 저장은 Streamlit Secrets의 SHEET_ID + SERVICE_ACCOUNT_JSON + 시트 공유 권한이 필요합니다.
+- 기존 API 삭제 없음
+- 기본 26개 순서만 정리
+- 과거/확정/기록성 자료는 미리저장 후 재사용
+- 오늘 경주 전후 변동 자료는 실시간 반복 수집
+- 보충 신청 추천 목록 표시
+- 미리저장 자료 수집센터 추가

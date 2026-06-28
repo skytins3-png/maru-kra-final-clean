@@ -4192,7 +4192,7 @@ def render_all_meet_all_race_monitor(rc_date: str, selected: List[str], sim_coun
     if sched.empty:
         st.error("전체 경마장 경주일정을 받지 못했습니다.")
         if isinstance(log_df, pd.DataFrame) and not log_df.empty:
-            st.dataframe(log_df, width="stretch", hide_index=True)
+            st.dataframe(log_df, use_container_width=True, hide_index=True)
         return
 
     try:
@@ -4204,7 +4204,7 @@ def render_all_meet_all_race_monitor(rc_date: str, selected: List[str], sim_coun
     display_cols = [c for c in ["날짜", "경마장", "경주번호", "경주시간", "경주시각"] if c in sched.columns]
     if display_cols:
         st.markdown("#### 오늘 전체 경주일정")
-        st.dataframe(sched[display_cols], width="stretch", hide_index=True, height=360)
+        st.dataframe(sched[display_cols], use_container_width=True, hide_index=True, height=360)
 
     targets = _current_or_next_races(sched, per_meet=3)
     if targets.empty:
@@ -4213,7 +4213,7 @@ def render_all_meet_all_race_monitor(rc_date: str, selected: List[str], sim_coun
 
     st.markdown("#### 현재/다음 점검 대상")
     show_cols = [c for c in ["경마장", "경주번호", "경주시간", "상태"] if c in targets.columns]
-    st.dataframe(targets[show_cols], width="stretch", hide_index=True, height=260)
+    st.dataframe(targets[show_cols], use_container_width=True, hide_index=True, height=260)
 
     render_force_real_collection_center(rc_date, selected, targets)  # FORCE_REAL_COLLECTION_CENTER_ALL_MEET_APPLY
     auto_m, auto_r = _auto_current_target_for_recommend(rc_date, "전체", 0)
@@ -4251,7 +4251,7 @@ def render_all_meet_all_race_monitor(rc_date: str, selected: List[str], sim_coun
         except Exception as e:
             result_rows.append({"경마장": meet, "오류": str(e)[:120]})
     if result_rows:
-        st.dataframe(pd.DataFrame(result_rows), width="stretch", hide_index=True)
+        st.dataframe(pd.DataFrame(result_rows), use_container_width=True, hide_index=True)
 
     st.info("추천은 서울 1R 고정이 아니라 위 표의 현재/다음 경주를 기준으로 확인합니다. 특정 경주를 깊게 분석하려면 사이드바에서 선택 경마장 모드로 바꾸면 됩니다.")
 
@@ -4352,12 +4352,12 @@ def render_source_truth_center(data=None, status_df=None, selected=None, collect
     hub_rows = [{"허브시트/항목": k, "상태": v} for k, v in snap.get("허브상태", {}).items()]
     if hub_rows:
         st.markdown("#### 허브 저장 상태")
-        st.dataframe(pd.DataFrame(hub_rows), width="stretch", hide_index=True, height=220)
+        st.dataframe(pd.DataFrame(hub_rows), use_container_width=True, hide_index=True, height=220)
 
     api_rows = snap.get("API상태", [])
     if api_rows:
         st.markdown("#### API별 직접수신/허브/캐시 출처")
-        st.dataframe(pd.DataFrame(api_rows), width="stretch", hide_index=True, height=360)
+        st.dataframe(pd.DataFrame(api_rows), use_container_width=True, hide_index=True, height=360)
     else:
         st.caption("아직 API 상태표가 없습니다. 수집모드가 허브만 분석이면 API 상태표가 비어 있을 수 있습니다.")
 
@@ -4779,7 +4779,7 @@ def render_no_click_api_excel_viewer(compact: bool = False, meet: str = "서울"
     if isinstance(status, pd.DataFrame) and not status.empty:
         st.markdown("#### API 접속 상태표")
         show_cols = [c for c in ["API", "key", "행수", "상태", "URL"] if c in status.columns]
-        st.dataframe(status[show_cols] if show_cols else status, width="stretch", hide_index=True, height=300 if compact else 420)
+        st.dataframe(status[show_cols] if show_cols else status, use_container_width=True, hide_index=True, height=300 if compact else 420)
     else:
         st.warning("API 상태표가 아직 없습니다.")
 
@@ -4796,7 +4796,7 @@ def render_no_click_api_excel_viewer(compact: bool = False, meet: str = "서울"
                     continue
                 label = dict(API_LABELS).get(key, key) if "API_LABELS" in globals() else key
                 st.markdown(f"**{label} · {len(df)}건**")
-                st.dataframe(df.head(200), width="stretch", hide_index=True, height=260 if compact else 360)
+                st.dataframe(df.head(200), use_container_width=True, hide_index=True, height=260 if compact else 360)
                 shown += 1
                 if compact and shown >= 5:
                     st.caption("모바일에서는 상위 5개 수신자료만 먼저 표시합니다.")
@@ -4967,7 +4967,7 @@ def render_direct_schedule_excel_viewer(compact: bool = False) -> None:
         show_cols = [c for c in ["날짜", "경마장", "경주번호", "경주시간", "경주시각"] if c in sched.columns]
         if not show_cols:
             show_cols = list(sched.columns)[:12]
-        st.dataframe(sched[show_cols], width="stretch", hide_index=True, height=360 if compact else 520)
+        st.dataframe(sched[show_cols], use_container_width=True, hide_index=True, height=360 if compact else 520)
     else:
         st.error("서울·부산경남·제주 경주일정을 직접 받지 못했습니다.")
         st.caption("아래 API 접속 로그에서 HTTP 오류, 0건, 키 오류를 확인하세요.")
@@ -4975,7 +4975,7 @@ def render_direct_schedule_excel_viewer(compact: bool = False) -> None:
     st.markdown("#### API 접속 로그")
     if isinstance(log_df, pd.DataFrame) and not log_df.empty:
         cols = [c for c in ["경마장", "API", "상태", "행수"] if c in log_df.columns]
-        st.dataframe(log_df[cols], width="stretch", hide_index=True, height=260 if compact else 380)
+        st.dataframe(log_df[cols], use_container_width=True, hide_index=True, height=260 if compact else 380)
     else:
         st.info("접속 로그가 없습니다.")
 
@@ -5087,7 +5087,7 @@ def _render_one_api_file_item(item: Dict[str, Any], idx: int, allow_download: bo
             st.markdown("#### 엑셀 뷰어")
             st.dataframe(
                 df,
-                width="stretch",
+                use_container_width=True,
                 hide_index=True,
                 height=360,
             )
@@ -5129,7 +5129,7 @@ def render_api_received_file_viewer(data=None, status_df=None, rc_date: str = ""
     summary_df = pd.DataFrame(files)
     show_cols = [c for c in ["구분", "API", "파일명", "행수", "컬럼수", "저장시각"] if c in summary_df.columns]
     if show_cols:
-        st.dataframe(summary_df[show_cols], width="stretch", hide_index=True, height=220 if compact else 300)
+        st.dataframe(summary_df[show_cols], use_container_width=True, hide_index=True, height=220 if compact else 300)
 
     schedule_files = [x for x in files if str(x.get("구분","")) == "경주일정"]
     status_files = [x for x in files if str(x.get("구분","")) == "상태표"]
@@ -5302,7 +5302,7 @@ def render_api_schedule_visibility_center(status_df=None, data=None) -> None:
     rows = snap.get("rows", [])
     if rows:
         df = pd.DataFrame(rows)
-        st.dataframe(df[["상태", "API", "행수", "메시지"]], width="stretch", hide_index=True)
+        st.dataframe(df[["상태", "API", "행수", "메시지"]], use_container_width=True, hide_index=True)
     else:
         st.warning("API 목록을 찾지 못했습니다.")
 
@@ -7014,7 +7014,7 @@ def render_sequential_26api_center(rc_date: str, meet: str, race_no: Any) -> Non
     if rows:
         df = pd.DataFrame(rows)
         show = [c for c in ["순번", "단계", "API", "key", "행수", "상태", "추천판정", "완료시각", "저장파일"] if c in df.columns]
-        st.dataframe(df[show], width="stretch", hide_index=True, height=360)
+        st.dataframe(df[show], use_container_width=True, hide_index=True, height=360)
     else:
         st.info("아직 순차 수집 기록이 없습니다. 자동 순차 진행을 켜거나 새로고침하면 1번 API부터 수집합니다.")
 
@@ -7201,7 +7201,7 @@ def render_force_real_collection_center(rc_date: str, selected: List[str], targe
 
     if isinstance(status, pd.DataFrame) and not status.empty:
         keep = [c for c in ["수집경마장", "수집경주번호", "API", "key", "행수", "상태", "수집방식", "URL"] if c in status.columns]
-        st.dataframe(status[keep] if keep else status, width="stretch", hide_index=True, height=320)
+        st.dataframe(status[keep] if keep else status, use_container_width=True, hide_index=True, height=320)
 
     if isinstance(data, dict) and data:
         with st.expander("받아온 자료 바로보기", expanded=True):
@@ -7213,7 +7213,7 @@ def render_force_real_collection_center(rc_date: str, selected: List[str], targe
                     if df.empty:
                         continue
                     st.markdown(f"**{k} · {len(df)}행**")
-                    st.dataframe(df.head(60), width="stretch", hide_index=True, height=220)
+                    st.dataframe(df.head(60), use_container_width=True, hide_index=True, height=220)
                     shown += 1
                     if shown >= 5:
                         st.caption("화면 속도 때문에 상위 5개 자료만 먼저 표시합니다. 전체는 엑셀 상세자료에서 확인하세요.")
@@ -7308,7 +7308,7 @@ def render_api_hub_panel(status: pd.DataFrame, data: Dict[str, pd.DataFrame]) ->
     with st.expander("API 상태 요약", expanded=True):
         if isinstance(status, pd.DataFrame) and not status.empty:
             keep_cols = [c for c in ["API", "key", "행수", "상태", "URL"] if c in status.columns]
-            st.dataframe(status[keep_cols] if keep_cols else status, width="stretch", height=360)
+            st.dataframe(status[keep_cols] if keep_cols else status, use_container_width=True, height=360)
             try:
                 ok_rows = int((pd.to_numeric(status.get("행수", 0), errors="coerce").fillna(0) > 0).sum())
                 st.caption(f"즉시 상태표 생성됨 · 수신 성공 API {ok_rows}개")
@@ -7326,7 +7326,7 @@ def render_api_hub_panel(status: pd.DataFrame, data: Dict[str, pd.DataFrame]) ->
         h3.metric("현재 데이터", f"{sum(len(v) for v in data.values()) if data else 0:,}행")
         if not local_hub_df.empty:
             show_cols = [c for c in ["저장시각", "경마장", "경주번호", "공격삼쌍승", "방어삼복승", "예상배당", "신뢰도", "추천금액"] if c in local_hub_df.columns]
-            st.dataframe(local_hub_df[show_cols].tail(30) if show_cols else local_hub_df.tail(30), width="stretch", height=330)
+            st.dataframe(local_hub_df[show_cols].tail(30) if show_cols else local_hub_df.tail(30), use_container_width=True, height=330)
         else:
             st.info("허브 저장 데이터가 아직 없습니다.")
 
@@ -7815,7 +7815,7 @@ def render_recommendation_after_each_race_center(rc_date: str, meet: str, race_n
     keys = ["안정형대표", "변수형대표", "고배당형대표", "공격삼쌍승", "방어삼복승", "예상배당", "신뢰도", "추천사유"]
     rows = [{"항목": k, "값": rec.get(k, "")} for k in keys if rec.get(k, "") != ""]
     if rows:
-        st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
 
 
@@ -7847,7 +7847,7 @@ def render_file_and_runtime_check_center() -> None:
         checks.append({"검사": "데이터폴더", "상태": "OK" if d.exists() else "WARN", "내용": str(d)})
     except Exception as e:
         checks.append({"검사": "데이터폴더", "상태": "FAIL", "내용": str(e)[:120]})
-    st.dataframe(pd.DataFrame(checks), width="stretch", hide_index=True)
+    st.dataframe(pd.DataFrame(checks), use_container_width=True, hide_index=True)
 
 
 
@@ -7922,7 +7922,7 @@ def render_sequential_26api_center(rc_date: str, meet: str, race_no: Any) -> Non
             {"순번": i+1, "단계": _api_stage_name(k), "API": _seq_label(k), "key": k}
             for i, k in enumerate(api_keys)
         ])
-        st.dataframe(order_df, width="stretch", hide_index=True)
+        st.dataframe(order_df, use_container_width=True, hide_index=True)
 
     col_a, col_b, col_c = st.columns([1,1,1])
     with col_a:
@@ -7933,13 +7933,13 @@ def render_sequential_26api_center(rc_date: str, meet: str, race_no: Any) -> Non
         refresh_sec = st.selectbox("멈춤방지 새로고침", [5, 10, 15, 30, 60], index=1, key=f"seq_refresh_sec_{target}")
 
     b1, b2, b3 = st.columns(3)
-    if b1.button("▶ 다음 API 1개 즉시 진행", key=f"seq_next_{target}", width="stretch"):
+    if b1.button("▶ 다음 API 1개 즉시 진행", key=f"seq_next_{target}", use_container_width=True):
         sequential_26api_step(rc_date, meet2, race_no2, 1)
         st.rerun()
-    if b2.button("⏭ 선택 개수 진행", key=f"seq_multi_{target}", width="stretch"):
+    if b2.button("⏭ 선택 개수 진행", key=f"seq_multi_{target}", use_container_width=True):
         sequential_26api_step(rc_date, meet2, race_no2, int(step_count))
         st.rerun()
-    if b3.button("🔄 처음부터 다시", key=f"seq_reset_{target}", width="stretch"):
+    if b3.button("🔄 처음부터 다시", key=f"seq_reset_{target}", use_container_width=True):
         reset_sequential_26api(rc_date, meet2, race_no2)
         st.rerun()
 
@@ -7963,7 +7963,7 @@ def render_sequential_26api_center(rc_date: str, meet: str, race_no: Any) -> Non
     if rows:
         df = pd.DataFrame(rows)
         show = [c for c in ["순번", "단계", "API", "key", "행수", "상태", "추천판정", "완료시각", "저장파일"] if c in df.columns]
-        st.dataframe(df[show], width="stretch", hide_index=True)
+        st.dataframe(df[show], use_container_width=True, hide_index=True)
         last_status = _seq_last_row_status(item)
         if "HTTP 500" in last_status or "HTTP 404" in last_status or "ERROR" in last_status.upper():
             st.warning("마지막 API가 오류였지만 실패로 저장하고 다음 API로 넘어가게 되어 있습니다.")
@@ -8147,7 +8147,7 @@ def render_recommendation_after_each_race_center(rc_date: str, meet: str, race_n
     keys = ["경마장", "경주번호", "안정형대표", "변수형대표", "고배당형대표", "공격삼쌍승", "방어삼복승", "예상배당", "신뢰도", "추천사유", "상태"]
     rows = [{"항목": k, "값": rec.get(k, "")} for k in keys if rec.get(k, "") != ""]
     if rows:
-        st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
 
 # STREAMLIT_DUPLICATE_WIDGET_KEY_FIX
@@ -8219,7 +8219,7 @@ def render_sequential_26api_center(rc_date: str, meet: str, race_no: Any) -> Non
             {"순번": i + 1, "단계": _api_stage_name(k), "API": _seq_label(k), "key": k}
             for i, k in enumerate(api_keys)
         ])
-        st.dataframe(order_df, width="stretch", hide_index=True)
+        st.dataframe(order_df, use_container_width=True, hide_index=True)
 
     col_a, col_b, col_c = st.columns([1, 1, 1])
     with col_a:
@@ -8230,13 +8230,13 @@ def render_sequential_26api_center(rc_date: str, meet: str, race_no: Any) -> Non
         refresh_sec = st.selectbox("멈춤방지 새로고침", [5, 10, 15, 30, 60], index=1, key=f"seq_refresh_sec_{widget_scope}")
 
     b1, b2, b3 = st.columns(3)
-    if b1.button("▶ 다음 API 1개 즉시 진행", key=f"seq_next_{widget_scope}", width="stretch"):
+    if b1.button("▶ 다음 API 1개 즉시 진행", key=f"seq_next_{widget_scope}", use_container_width=True):
         sequential_26api_step(rc_date, meet2, race_no2, 1)
         st.rerun()
-    if b2.button("⏭ 선택 개수 진행", key=f"seq_multi_{widget_scope}", width="stretch"):
+    if b2.button("⏭ 선택 개수 진행", key=f"seq_multi_{widget_scope}", use_container_width=True):
         sequential_26api_step(rc_date, meet2, race_no2, int(step_count))
         st.rerun()
-    if b3.button("🔄 처음부터 다시", key=f"seq_reset_{widget_scope}", width="stretch"):
+    if b3.button("🔄 처음부터 다시", key=f"seq_reset_{widget_scope}", use_container_width=True):
         reset_sequential_26api(rc_date, meet2, race_no2)
         st.rerun()
 
@@ -8260,7 +8260,7 @@ def render_sequential_26api_center(rc_date: str, meet: str, race_no: Any) -> Non
     if rows:
         df = pd.DataFrame(rows)
         show = [c for c in ["순번", "단계", "API", "key", "행수", "상태", "추천판정", "완료시각", "저장파일"] if c in df.columns]
-        st.dataframe(df[show], width="stretch", hide_index=True)
+        st.dataframe(df[show], use_container_width=True, hide_index=True)
         try:
             last_status = str(rows[-1].get("상태", ""))
             if "HTTP 500" in last_status or "HTTP 404" in last_status or "ERROR" in last_status.upper():
@@ -8324,8 +8324,8 @@ def render_mobile_safe_home(rc_date: str = "", meet: str = "전체", race_no: An
                 st.markdown(f"**{k}** : `{v}`")
 
     st.divider()
-    st.link_button("📱 더비온 바로가기", "https://www.derbyon.co.kr", width="stretch")
-    st.link_button("🖥 PC 관리화면 열기", "https://maru-kra-final-clean.streamlit.app/?v=hardfinal1", width="stretch")
+    st.link_button("📱 더비온 바로가기", "https://www.derbyon.co.kr", use_container_width=True)
+    st.link_button("🖥 PC 관리화면 열기", "https://maru-kra-final-clean.streamlit.app/?v=hardfinal1", use_container_width=True)
     st.caption("모바일 백지 방지를 위해 이 화면에서는 자동 rerun을 사용하지 않습니다.")
 
 def _mobile_stop_if_needed(rc_date: str = "", meet: str = "전체", race_no: Any = 0) -> None:
@@ -8415,13 +8415,13 @@ def render_pc_hub_recommend_confirm_center(rc_date: str, meet: str, race_no: Any
         st.warning(rec.get("상태", "추천 대기"))
 
     cols = st.columns(3)
-    if cols[0].button("✅ PC 확인 후 모바일 허브 저장", width="stretch", key=f"pc_confirm_save_{auto_meet}_{auto_race}"):
+    if cols[0].button("✅ PC 확인 후 모바일 허브 저장", use_container_width=True, key=f"pc_confirm_save_{auto_meet}_{auto_race}"):
         ok = _hub_save_pc_confirmed_recommend(rec)
         if ok:
             st.success("허브 mobile_recommend에 저장했습니다. 모바일은 이 결과를 읽습니다.")
         else:
             st.error("허브 저장 함수가 없거나 저장 실패했습니다. 로컬 저장만 확인하세요.")
-    if cols[1].button("🔄 허브 최신 추천 다시 읽기", width="stretch", key=f"pc_reload_hub_{auto_meet}_{auto_race}"):
+    if cols[1].button("🔄 허브 최신 추천 다시 읽기", use_container_width=True, key=f"pc_reload_hub_{auto_meet}_{auto_race}"):
         h = _hub_load_latest_recommend()
         if h:
             st.session_state["latest_each_race_recommend"] = h
@@ -8429,12 +8429,12 @@ def render_pc_hub_recommend_confirm_center(rc_date: str, meet: str, race_no: Any
             st.rerun()
         else:
             st.warning("허브에 읽을 추천이 없습니다.")
-    cols[2].link_button("📱 모바일 결과 보기", "https://maru-kra-final-clean.streamlit.app/?mode=mobile&v=hubflow1", width="stretch")
+    cols[2].link_button("📱 모바일 결과 보기", "https://maru-kra-final-clean.streamlit.app/?mode=mobile&v=hubflow1", use_container_width=True)
 
     show_keys = ["경마장", "경주번호", "안정형대표", "변수형대표", "고배당형대표", "예상배당", "신뢰도", "추천사유", "PC확인", "허브저장시각", "상태"]
     rows = [{"항목": k, "값": rec.get(k, "")} for k in show_keys if rec.get(k, "") != ""]
     if rows:
-        st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
 def render_mobile_safe_home(rc_date: str = "", meet: str = "전체", race_no: Any = 0) -> None:
     """
@@ -8465,8 +8465,8 @@ def render_mobile_safe_home(rc_date: str = "", meet: str = "전체", race_no: An
                 st.markdown(f"**{k}** : `{v}`")
 
     st.divider()
-    st.link_button("📱 더비온 바로가기", "https://www.derbyon.co.kr", width="stretch")
-    st.link_button("🖥 PC 관리화면 열기", "https://maru-kra-final-clean.streamlit.app/?v=hubflow1", width="stretch")
+    st.link_button("📱 더비온 바로가기", "https://www.derbyon.co.kr", use_container_width=True)
+    st.link_button("🖥 PC 관리화면 열기", "https://maru-kra-final-clean.streamlit.app/?v=hubflow1", use_container_width=True)
     st.caption("모바일에서는 26개 API 자동수집을 돌리지 않아 백지/무한로딩을 막습니다.")
 
 
@@ -8674,7 +8674,7 @@ def render_hub_storage_status_center() -> None:
             "추천": d.get("안정형대표", d.get("추천", "")),
         })
     df = pd.DataFrame(rows)
-    st.dataframe(df, width="stretch", hide_index=True)
+    st.dataframe(df, use_container_width=True, hide_index=True)
 
     last = st.session_state.get("last_double_safety_verify", {})
     if isinstance(last, dict) and last:
@@ -8690,14 +8690,14 @@ def render_hub_pipeline_control_center(rc_date: str, meet: str, race_no: Any) ->
     st.info(f"대상 경주: {auto_meet} {auto_race}R")
 
     c1, c2, c3 = st.columns(3)
-    if c1.button("① 허브자료 저장+분석+모바일추천", width="stretch", key=f"hub_pipeline_run_{auto_meet}_{auto_race}"):
+    if c1.button("① 허브자료 저장+분석+모바일추천", use_container_width=True, key=f"hub_pipeline_run_{auto_meet}_{auto_race}"):
         run = hub_collect_save_analyze_recommend(rc_date, auto_meet, int(auto_race))
         st.session_state["last_hub_pipeline_run"] = run
         st.success("허브 저장/분석/추천 파이프라인 실행 완료")
         st.rerun()
-    if c2.button("② 저장 여부 다시 확인", width="stretch", key=f"hub_storage_check_{auto_meet}_{auto_race}"):
+    if c2.button("② 저장 여부 다시 확인", use_container_width=True, key=f"hub_storage_check_{auto_meet}_{auto_race}"):
         st.session_state["force_show_hub_storage"] = True
-    c3.link_button("③ 모바일 추천결과 보기", "https://maru-kra-final-clean.streamlit.app/?mode=mobile&v=hubdual1", width="stretch")
+    c3.link_button("③ 모바일 추천결과 보기", "https://maru-kra-final-clean.streamlit.app/?mode=mobile&v=hubdual1", use_container_width=True)
 
     render_hub_storage_status_center()
 
@@ -8726,8 +8726,8 @@ def render_mobile_safe_home(rc_date: str = "", meet: str = "전체", race_no: An
                 st.markdown(f"**{k}** : `{v}`")
 
     st.divider()
-    st.link_button("📱 더비온 바로가기", "https://www.derbyon.co.kr", width="stretch")
-    st.link_button("🖥 PC 관리화면 열기", "https://maru-kra-final-clean.streamlit.app/?v=hubdual1", width="stretch")
+    st.link_button("📱 더비온 바로가기", "https://www.derbyon.co.kr", use_container_width=True)
+    st.link_button("🖥 PC 관리화면 열기", "https://maru-kra-final-clean.streamlit.app/?v=hubdual1", use_container_width=True)
     st.caption("모바일은 확인 전용입니다. 수집/분석/저장은 PC와 허브에서 처리합니다.")
 
 
@@ -8766,7 +8766,7 @@ def render_google_sheet_visible_center() -> None:
     c3.metric("SHEET_ID", sid[-8:] if sid else "없음")
 
     st.code(url, language="text")
-    st.link_button("📗 구글시트 MARU_KRA_HUB 열기", url, width="stretch")
+    st.link_button("📗 구글시트 MARU_KRA_HUB 열기", url, use_container_width=True)
 
     try:
         secret_has_sheet = False
@@ -8782,7 +8782,7 @@ def render_google_sheet_visible_center() -> None:
             {"항목": "기본 시트명", "상태": "OK", "값": DEFAULT_MARU_KRA_SHEET_NAME},
             {"항목": "저장 확인", "상태": "아래 저장 확인센터 확인", "값": "출처가 허브/구글시트면 성공"},
         ]
-        st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
     except Exception:
         pass
 
@@ -8793,7 +8793,7 @@ def _render_sidebar_google_sheet_link() -> None:
     try:
         st.sidebar.markdown("---")
         st.sidebar.markdown("### 📗 구글시트 허브")
-        st.sidebar.link_button("MARU_KRA_HUB 열기", _get_sheet_url_visible(), width="stretch")
+        st.sidebar.link_button("MARU_KRA_HUB 열기", _get_sheet_url_visible(), use_container_width=True)
         st.sidebar.caption("저장 확인은 PC 화면의 구글시트 허브 메뉴에서 확인")
     except Exception:
         pass
@@ -8861,7 +8861,7 @@ def render_google_sheet_visible_center() -> None:
         {"항목": "현재 사용 SHEET_ID", "상태": "OK" if current_sid else "없음", "값": current_sid if current_sid else "-"},
         {"항목": "기본 시트명", "상태": "참고", "값": "MARU_KRA_HUB"},
     ]
-    st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
+    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
     st.markdown("#### 2) 실제 구글시트 주소 붙여넣기")
     raw = st.text_input(
@@ -8870,7 +8870,7 @@ def render_google_sheet_visible_center() -> None:
         placeholder="https://docs.google.com/spreadsheets/d/실제ID/edit",
         key="manual_sheet_raw_input",
     )
-    if st.button("📌 이 주소를 화면 연결값으로 사용", width="stretch", key="apply_manual_sheet_id"):
+    if st.button("📌 이 주소를 화면 연결값으로 사용", use_container_width=True, key="apply_manual_sheet_id"):
         sid = _extract_sheet_id_from_url_or_id(raw)
         if sid:
             st.session_state["manual_sheet_raw"] = raw
@@ -8884,7 +8884,7 @@ def render_google_sheet_visible_center() -> None:
     current_url = _get_sheet_url_visible()
     if current_url:
         st.code(current_url, language="text")
-        st.link_button("📗 현재 구글시트 열기", current_url, width="stretch")
+        st.link_button("📗 현재 구글시트 열기", current_url, use_container_width=True)
     else:
         st.warning("아직 사용할 SHEET_ID가 없습니다. Streamlit Secrets에 SHEET_ID를 넣거나 위 칸에 실제 구글시트 주소를 붙여넣어 주세요.")
 
@@ -8900,12 +8900,137 @@ def _render_sidebar_google_sheet_link() -> None:
         st.sidebar.markdown("### 📗 구글시트 허브")
         url = _get_sheet_url_visible()
         if url:
-            st.sidebar.link_button("현재 구글시트 열기", url, width="stretch")
+            st.sidebar.link_button("현재 구글시트 열기", url, use_container_width=True)
         else:
             st.sidebar.caption("SHEET_ID 없음: API/허브 화면에서 실제 주소를 붙여넣으세요.")
         st.sidebar.caption("잘못된 주소 고정 사용 안 함")
     except Exception:
         pass
+
+
+
+
+
+# API_PREFETCH_REALTIME_PRIORITY_26_FIX
+PREFETCH_STATIC_API_KEYS = [
+    "result_detail_url","race_detail_result_url","race_record_url","jockey_result_url",
+    "horse_url","rating_url","corner_pace_url","dividend_integrated_url",
+    "first_odds_url","second_odds_url","third_odds_url",
+]
+REALTIME_API_KEYS = [
+    "race_url","race_overview_url","entry_url","entry_registered_url","body_url",
+    "jockey_change_url","race_cancel_url","popularity_url","odds_url","today_odds_url",
+    "weather_alert_url","gear_url","horse_shoe_url","start_exam_url","judge_url",
+]
+SUPPLEMENT_API_WISHLIST = [
+    {"추천API":"기수 성적 정보","용도":"기수 통산/최근1년 승률·1착률","분류":"미리저장"},
+    {"추천API":"기수 상세정보","용도":"기수 소속/상태/기본정보","분류":"미리저장"},
+    {"추천API":"경주마 상세정보","용도":"말 혈통/나이/성별/통산성적","분류":"미리저장"},
+    {"추천API":"출전마 장구사용 및 폐출혈 정보","용도":"장구 변경/폐출혈 변수","분류":"실시간/당일"},
+    {"추천API":"마필 구간별 경주기록","용도":"초반/중반/막판 힘 분석","분류":"미리저장"},
+    {"추천API":"경주 구간별 성적 정보","용도":"코너 위치/선행·추입 성향","분류":"미리저장"},
+    {"추천API":"예상배당률 통합 정보","용도":"구매 직전 배당 흐름","분류":"실시간"},
+    {"추천API":"승식별 최고배당률 정보","용도":"고배당 패턴 학습","분류":"미리저장"},
+]
+def _available_api_keys() -> List[str]:
+    try:
+        return [k for k, _ in API_LABELS]
+    except Exception:
+        return []
+def _api_label_safe(k: str) -> str:
+    try:
+        return _seq_label(k)
+    except Exception:
+        try:
+            return dict(API_LABELS).get(k, k)
+        except Exception:
+            return k
+def _api_collection_bucket(k: str) -> str:
+    if k in REALTIME_API_KEYS:
+        return "실시간 반복"
+    if k in PREFETCH_STATIC_API_KEYS:
+        return "미리저장/재사용"
+    return "보조/확인"
+def _active_26_api_keys() -> List[str]:
+    available=_available_api_keys()
+    preferred=[
+        "race_url","race_overview_url","entry_url","entry_registered_url",
+        "body_url","jockey_change_url","race_cancel_url","weather_alert_url",
+        "gear_url","horse_shoe_url","popularity_url","odds_url","today_odds_url",
+        "start_exam_url","judge_url","horse_url","rating_url","jockey_result_url",
+        "corner_pace_url","result_detail_url","race_detail_result_url","race_record_url",
+        "dividend_integrated_url","first_odds_url","second_odds_url","third_odds_url",
+    ]
+    ordered=[k for k in preferred if k in available]
+    ordered += [k for k in available if k not in ordered]
+    return ordered[:26] if len(ordered)>26 else ordered
+def _seq_api_keys() -> List[str]:
+    return _active_26_api_keys()
+def render_api_priority_strategy_center() -> None:
+    st.markdown("### 🧭 API 우선순위 정리")
+    st.caption("기존 API는 빼지 않고, 기본 수집 순서만 미리저장/실시간으로 나눴습니다.")
+    available=_available_api_keys()
+    active=_active_26_api_keys()
+    rows=[{"순번":i+1,"분류":_api_collection_bucket(k),"API":_api_label_safe(k),"key":k,
+           "운영방식":"오늘 경주 때 반복 확인" if k in REALTIME_API_KEYS else "한 번 저장 후 재사용/보충"}
+          for i,k in enumerate(active)]
+    st.markdown("#### 기본 실행 26개 순서")
+    st.dataframe(pd.DataFrame(rows),use_container_width=True,hide_index=True)
+    c1,c2=st.columns(2)
+    with c1:
+        st.markdown("#### 실시간으로 받아야 하는 것")
+        r=[{"API":_api_label_safe(k),"key":k,"이유":"오늘 경주 전후 변동 가능"} for k in REALTIME_API_KEYS if k in available]
+        st.dataframe(pd.DataFrame(r),use_container_width=True,hide_index=True) if r else st.info("현재 등록된 실시간 키 없음")
+    with c2:
+        st.markdown("#### 미리 받아 저장할 것")
+        s=[{"API":_api_label_safe(k),"key":k,"이유":"확정 후 거의 변동 없음, 저장소 재사용"} for k in PREFETCH_STATIC_API_KEYS if k in available]
+        st.dataframe(pd.DataFrame(s),use_container_width=True,hide_index=True) if s else st.info("현재 등록된 미리저장 키 없음")
+    st.markdown("#### 보충 신청 추천 목록")
+    st.dataframe(pd.DataFrame(SUPPLEMENT_API_WISHLIST),use_container_width=True,hide_index=True)
+    h=[{"API":_api_label_safe(k),"key":k,"상태":"기존 유지, 기본 26개 밖 보조"} for k in available if k not in active]
+    if h:
+        with st.expander("기존에는 있지만 기본 26개 밖으로 밀린 보조 API", expanded=False):
+            st.dataframe(pd.DataFrame(h),use_container_width=True,hide_index=True)
+def render_prefetch_static_data_center(rc_date: str, meet: str, race_no: Any) -> None:
+    st.markdown("### 🗄️ 미리 저장 자료 수집센터")
+    st.caption("과거 우승마/기수/확정결과/기록성 자료는 한 번 저장하고 계속 재사용합니다.")
+    meet2="서울" if str(meet or "전체")=="전체" else str(meet or "서울")
+    try:
+        race_no2=int(float(race_no or 1)); race_no2 = race_no2 if race_no2>0 else 1
+    except Exception:
+        race_no2=1
+    keys=[k for k in PREFETCH_STATIC_API_KEYS if k in _available_api_keys()]
+    if not keys:
+        st.warning("현재 API_LABELS에서 미리저장 대상 키를 찾지 못했습니다."); return
+    if st.button("📥 미리저장 자료 1회 수집/저장", use_container_width=True, key=f"prefetch_static_{rc_date}_{meet2}_{race_no2}"):
+        saved=[]; data=st.session_state.get("live_data",{}) or {}
+        for k in keys:
+            try:
+                df,msg,used_url=fetch_one_api(k,rc_date,meet2,race_no2)
+                if df is None: df=pd.DataFrame()
+                if not isinstance(df,pd.DataFrame): df=pd.DataFrame(df)
+                if not df.empty: data[k]=df
+                payload={"날짜":rc_date,"경마장":meet2,"경주번호":race_no2,"분류":"미리저장",
+                         "API":_api_label_safe(k),"key":k,"행수":int(len(df)),"상태":msg,
+                         "저장시각":now_str() if "now_str" in globals() else str(dt.datetime.now())}
+                try:
+                    if "double_safety_save" in globals(): double_safety_save("prefetch_static_summary",payload)
+                    elif "external_hub_save" in globals(): external_hub_save("prefetch_static_summary",payload)
+                except Exception as e:
+                    payload["저장오류"]=str(e)[:120]
+                saved.append(payload)
+            except Exception as e:
+                saved.append({"날짜":rc_date,"경마장":meet2,"경주번호":race_no2,"분류":"미리저장",
+                              "API":_api_label_safe(k),"key":k,"행수":0,"상태":f"ERROR: {str(e)[:160]}",
+                              "저장시각":now_str() if "now_str" in globals() else str(dt.datetime.now())})
+        st.session_state["live_data"]=data
+        st.session_state["last_prefetch_static"]=saved
+        st.success("미리저장 자료 수집/저장 완료")
+        st.dataframe(pd.DataFrame(saved),use_container_width=True,hide_index=True)
+    old=st.session_state.get("last_prefetch_static",[])
+    if old:
+        with st.expander("최근 미리저장 결과",expanded=False):
+            st.dataframe(pd.DataFrame(old),use_container_width=True,hide_index=True)
 
 
 def render() -> None:
@@ -9051,6 +9176,8 @@ def render() -> None:
         render_sequential_26api_center(rc_date, tab_m, tab_r)  # CURRENT_RACE_TARGET_MATCH_SEQ_TAB_APPLY
         render_recommendation_after_each_race_center(rc_date, tab_m, tab_r)  # CURRENT_RACE_TARGET_MATCH_RECOMMEND_TAB_APPLY
         render_pc_hub_recommend_confirm_center(rc_date, tab_m if "tab_m" in locals() else meet, tab_r if "tab_r" in locals() else race_no)  # HUB_PC_MOBILE_RECOMMEND_FLOW_TAB_APPLY
+        render_api_priority_strategy_center()  # API_PREFETCH_REALTIME_PRIORITY_26_TAB_APPLY
+        render_prefetch_static_data_center(rc_date, tab_m if 'tab_m' in locals() else meet, tab_r if 'tab_r' in locals() else race_no)
         render_google_sheet_visible_center()  # GOOGLE_SHEET_VISIBLE_TAB_APPLY
         render_hub_pipeline_control_center(rc_date, tab_m if 'tab_m' in locals() else meet, tab_r if 'tab_r' in locals() else race_no)  # HUB_SHEET_DOUBLE_SAFETY_FLOW_TAB_APPLY
         render_file_and_runtime_check_center()  # FILE_RUNTIME_CHECK_TAB_APPLY
