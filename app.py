@@ -2849,6 +2849,11 @@ def save_mobile_recommend_json(row: Dict[str, Any]) -> bool:
         small = _build_three_type_recommendation(small)  # THREE_TYPE_SAVE_APPLY
         _save_three_type_hub_and_bigdata(small)
         _save_five_agent_run(small)  # FIVE_AGENT_SAVE_APPLY
+        small = _apply_agent365_probability(small) if "_apply_agent365_probability" in globals() else small  # AGENT365_PROBABILITY_SAVE_APPLY
+        try:
+            _agent365_tick("save_mobile_recommend", small)
+        except Exception:
+            pass
         small = _mobile_compact_summary(small)  # MOBILE_COMPACT_SAVE
         small["구매표복사"] = _compact_ticket_lines(small.get("구매표복사", ""), 22)
         mobile_text = json.dumps(small, ensure_ascii=False, indent=2)
@@ -8736,179 +8741,92 @@ def render_mobile_safe_home(rc_date: str = "", meet: str = "전체", race_no: An
 
 
 
-# GOOGLE_SHEET_VISIBLE_MENU_FIX
-DEFAULT_MARU_KRA_SHEET_ID = "1uT8IQfbpjhblvFOsFdBSmAnGHXzqhlZQ5jsBayLTpwc"
-DEFAULT_MARU_KRA_SHEET_NAME = "MARU_KRA_HUB"
+# GOOGLE_SHEET_HARDCODED_NO_INPUT_FIX
+# 요청사항: PC/모바일 어디에서도 구글시트 ID를 다시 입력하지 않음.
+# 앱 안에 형님 허브 SHEET_ID/GID를 고정 포함합니다.
+MARU_KRA_FIXED_SHEET_ID = "1uT8lQfbpjhblvFOsFdBSmAnGHXzqhlZQ5jsBayLTpwo"
+MARU_KRA_FIXED_SHEET_GID = "909440003"
+MARU_KRA_FIXED_SHEET_NAME = "MARU_KRA_HUB"
+MARU_KRA_FIXED_SHEET_URL = f"https://docs.google.com/spreadsheets/d/{MARU_KRA_FIXED_SHEET_ID}/edit?gid={MARU_KRA_FIXED_SHEET_GID}#gid={MARU_KRA_FIXED_SHEET_GID}"
 
-def _get_sheet_id_visible() -> str:
-    try:
-        sid = ""
-        if "st" in globals():
-            try:
-                sid = str(st.secrets.get("SHEET_ID", "") or "")
-            except Exception:
-                sid = ""
-        return sid or DEFAULT_MARU_KRA_SHEET_ID
-    except Exception:
-        return DEFAULT_MARU_KRA_SHEET_ID
-
-def _get_sheet_url_visible() -> str:
-    return f"https://docs.google.com/spreadsheets/d/{_get_sheet_id_visible()}/edit"
-
-def render_google_sheet_visible_center() -> None:
-    st.markdown("### 📗 구글시트 허브")
-    st.caption("허브 저장 위치를 화면에서 바로 확인합니다. 저장 성공 여부는 아래 확인센터에서 봅니다.")
-
-    sid = _get_sheet_id_visible()
-    url = _get_sheet_url_visible()
-
-    c1, c2, c3 = st.columns(3)
-    c1.metric("구글시트", "연결 주소 표시")
-    c2.metric("기본 탭", DEFAULT_MARU_KRA_SHEET_NAME)
-    c3.metric("SHEET_ID", sid[-8:] if sid else "없음")
-
-    st.code(url, language="text")
-    st.link_button("📗 구글시트 MARU_KRA_HUB 열기", url, use_container_width=True)
-
-    try:
-        secret_has_sheet = False
-        secret_has_json = False
-        try:
-            secret_has_sheet = bool(st.secrets.get("SHEET_ID", ""))
-            secret_has_json = bool(st.secrets.get("SERVICE_ACCOUNT_JSON", ""))
-        except Exception:
-            pass
-        rows = [
-            {"항목": "SHEET_ID", "상태": "OK" if secret_has_sheet else "기본값 사용", "값": sid},
-            {"항목": "SERVICE_ACCOUNT_JSON", "상태": "OK" if secret_has_json else "없음/확인필요", "값": "Streamlit Secrets"},
-            {"항목": "기본 시트명", "상태": "OK", "값": DEFAULT_MARU_KRA_SHEET_NAME},
-            {"항목": "저장 확인", "상태": "아래 저장 확인센터 확인", "값": "출처가 허브/구글시트면 성공"},
-        ]
-        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
-    except Exception:
-        pass
-
-    if "render_hub_storage_status_center" in globals():
-        render_hub_storage_status_center()
-
-def _render_sidebar_google_sheet_link() -> None:
-    try:
-        st.sidebar.markdown("---")
-        st.sidebar.markdown("### 📗 구글시트 허브")
-        st.sidebar.link_button("MARU_KRA_HUB 열기", _get_sheet_url_visible(), use_container_width=True)
-        st.sidebar.caption("저장 확인은 PC 화면의 구글시트 허브 메뉴에서 확인")
-    except Exception:
-        pass
+# 기존 코드 호환용 이름도 같은 값으로 고정
+DEFAULT_MARU_KRA_SHEET_ID = MARU_KRA_FIXED_SHEET_ID
+DEFAULT_MARU_KRA_SHEET_NAME = MARU_KRA_FIXED_SHEET_NAME
 
 
-
-
-
-# GOOGLE_SHEET_URL_INPUT_AND_NO_BROKEN_DEFAULT_FIX
 def _extract_sheet_id_from_url_or_id(text: str) -> str:
+    """기존 호환용 함수. 화면 입력은 없지만, 내부 테스트/과거 함수가 호출해도 안전하게 처리."""
     text = str(text or "").strip()
     if not text:
         return ""
     m = re.search(r"/spreadsheets/d/([a-zA-Z0-9-_]+)", text)
     if m:
         return m.group(1)
-    # raw ID
     if re.fullmatch(r"[a-zA-Z0-9-_]{20,}", text):
         return text
     return ""
 
+
 def _get_sheet_id_visible() -> str:
-    """
-    우선순위:
-    1) Streamlit Secrets SHEET_ID
-    2) 사용자가 화면에서 붙여넣은 sheet id/url
-    3) 기존 기본값은 참고용으로만 사용
-    """
-    try:
-        try:
-            sid = str(st.secrets.get("SHEET_ID", "") or "").strip()
-            if sid:
-                return sid
-        except Exception:
-            pass
-        sid = str(st.session_state.get("manual_sheet_id", "") or "").strip()
-        if sid:
-            return sid
-        return ""
-    except Exception:
-        return ""
+    """구글시트 ID는 사용자가 입력하지 않고 앱에 포함된 고정 ID만 사용합니다."""
+    return MARU_KRA_FIXED_SHEET_ID
+
+
+def _get_sheet_gid_visible() -> str:
+    return MARU_KRA_FIXED_SHEET_GID
+
 
 def _get_sheet_url_visible() -> str:
-    sid = _get_sheet_id_visible()
-    if not sid:
-        return ""
-    return f"https://docs.google.com/spreadsheets/d/{sid}/edit"
+    return MARU_KRA_FIXED_SHEET_URL
+
+
+def get_fixed_google_sheet_hub_config() -> Dict[str, str]:
+    """허브/진단/모바일 표시에서 공통으로 쓰는 고정 구글시트 정보."""
+    return {
+        "sheet_id": MARU_KRA_FIXED_SHEET_ID,
+        "gid": MARU_KRA_FIXED_SHEET_GID,
+        "sheet_name": MARU_KRA_FIXED_SHEET_NAME,
+        "url": MARU_KRA_FIXED_SHEET_URL,
+        "mode": "CLOUD_HUB_FIXED_SHEET_ID",
+    }
+
 
 def render_google_sheet_visible_center() -> None:
+    """PC 확인용: 입력창 없이 고정 허브 정보를 보여줍니다."""
     st.markdown("### 📗 구글시트 허브")
-    st.caption("깨진 주소를 고정하지 않고, Streamlit Secrets의 SHEET_ID 또는 여기에 붙여넣은 실제 구글시트 주소를 사용합니다.")
+    st.success("구글시트 ID가 앱 안에 포함되어 있습니다. PC/모바일에서 다시 입력하지 않습니다.")
 
-    try:
-        secret_sid = str(st.secrets.get("SHEET_ID", "") or "").strip()
-    except Exception:
-        secret_sid = ""
-
-    st.markdown("#### 1) 현재 연결값")
-    current_sid = _get_sheet_id_visible()
-    current_url = _get_sheet_url_visible()
-
+    cfg = get_fixed_google_sheet_hub_config()
     rows = [
-        {"항목": "Secrets SHEET_ID", "상태": "OK" if secret_sid else "없음", "값": secret_sid if secret_sid else "-"},
-        {"항목": "화면 입력 SHEET_ID", "상태": "OK" if st.session_state.get("manual_sheet_id") else "없음", "값": st.session_state.get("manual_sheet_id", "-")},
-        {"항목": "현재 사용 SHEET_ID", "상태": "OK" if current_sid else "없음", "값": current_sid if current_sid else "-"},
-        {"항목": "기본 시트명", "상태": "참고", "값": "MARU_KRA_HUB"},
+        {"항목": "허브 모드", "상태": "고정 적용", "값": cfg["mode"]},
+        {"항목": "SHEET_ID", "상태": "앱 포함", "값": cfg["sheet_id"]},
+        {"항목": "GID", "상태": "앱 포함", "값": cfg["gid"]},
+        {"항목": "기본 시트명", "상태": "확인용", "값": cfg["sheet_name"]},
+        {"항목": "모바일 역할", "상태": "입력창 없음", "값": "mobile_recommend 최신 추천만 표시"},
+        {"항목": "자동구매/자동결제", "상태": "없음", "값": "사용자가 직접 마권 구매"},
     ]
     st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+    st.code(cfg["url"], language="text")
+    st.link_button("📗 고정 구글시트 허브 열기", cfg["url"], use_container_width=True)
 
-    st.markdown("#### 2) 실제 구글시트 주소 붙여넣기")
-    raw = st.text_input(
-        "구글시트 주소 또는 SHEET_ID",
-        value=st.session_state.get("manual_sheet_raw", ""),
-        placeholder="https://docs.google.com/spreadsheets/d/실제ID/edit",
-        key="manual_sheet_raw_input",
-    )
-    if st.button("📌 이 주소를 화면 연결값으로 사용", use_container_width=True, key="apply_manual_sheet_id"):
-        sid = _extract_sheet_id_from_url_or_id(raw)
-        if sid:
-            st.session_state["manual_sheet_raw"] = raw
-            st.session_state["manual_sheet_id"] = sid
-            st.success(f"SHEET_ID 적용: {sid}")
-            st.rerun()
-        else:
-            st.error("주소에서 SHEET_ID를 찾지 못했습니다. 구글시트 주소 전체를 다시 붙여넣어 주세요.")
-
-    current_sid = _get_sheet_id_visible()
-    current_url = _get_sheet_url_visible()
-    if current_url:
-        st.code(current_url, language="text")
-        st.link_button("📗 현재 구글시트 열기", current_url, use_container_width=True)
-    else:
-        st.warning("아직 사용할 SHEET_ID가 없습니다. Streamlit Secrets에 SHEET_ID를 넣거나 위 칸에 실제 구글시트 주소를 붙여넣어 주세요.")
-
-    st.markdown("#### 3) 저장 확인")
+    st.markdown("#### 저장 확인")
     if "render_hub_storage_status_center" in globals():
         render_hub_storage_status_center()
     else:
         st.info("저장 확인센터 함수가 아직 로드되지 않았습니다.")
 
+
 def _render_sidebar_google_sheet_link() -> None:
+    """사이드바: 입력창 없이 고정 허브 링크만 표시."""
     try:
+        cfg = get_fixed_google_sheet_hub_config()
         st.sidebar.markdown("---")
         st.sidebar.markdown("### 📗 구글시트 허브")
-        url = _get_sheet_url_visible()
-        if url:
-            st.sidebar.link_button("현재 구글시트 열기", url, use_container_width=True)
-        else:
-            st.sidebar.caption("SHEET_ID 없음: API/허브 화면에서 실제 주소를 붙여넣으세요.")
-        st.sidebar.caption("잘못된 주소 고정 사용 안 함")
+        st.sidebar.caption("SHEET_ID 앱 포함 · 입력 필요 없음")
+        st.sidebar.link_button("고정 허브 열기", cfg["url"], use_container_width=True)
+        st.sidebar.caption(f"ID: {cfg['sheet_id'][:10]}…{cfg['sheet_id'][-6:]}")
     except Exception:
         pass
-
 
 
 
@@ -9247,6 +9165,7 @@ def render() -> None:
     )
     st.caption("자동구매/자동결제 없음. 공식 구매 페이지로 이동 후 사용자가 직접 입력·확정합니다.")
     render_character_growth_dashboard()  # PC_CHARACTER_DASHBOARD_APPLY
+    render_agent365_control_center(compact=False)  # AGENT365_PC_CONTROL_APPLY
 
     with st.sidebar:
         st.title("🐎 MARU KRA")
@@ -9450,6 +9369,662 @@ def _current_or_next_races(sched: pd.DataFrame, per_meet: int = 3) -> pd.DataFra
             gg = g.head(per_meet)
         out.append(gg)
     return pd.concat(out, ignore_index=True) if out else pd.DataFrame()
+
+
+
+
+# AGENT365_PROBABILITY_ALWAYS_ON_FIX
+# 목적: 해·달·별·구름·비 5명 에이전트가 365일 허브 중심으로 수집/학습/분석/추천/복기를 남기고,
+# 모바일에는 적중 보장이 아닌 "참고 확률/신뢰도"를 크게 보여줍니다. 자동구매/자동결제는 절대 하지 않습니다.
+AGENT365_VERSION = "agent365_probability_v1"
+AGENT365_HUB_KINDS = [
+    "mobile_recommend", "three_type_recommend", "learning_bigdata", "agent_runs",
+    "agent_365_runs", "agent_365_lessons", "agent_365_probability", "failure_reason_log"
+]
+
+
+def _agent365_now() -> datetime.datetime:
+    try:
+        return now_kst() if "now_kst" in globals() else datetime.datetime.now()
+    except Exception:
+        return datetime.datetime.now()
+
+
+def _agent365_safe_pct(v: Any, default: int = 0) -> int:
+    try:
+        if isinstance(v, str):
+            v = v.replace("%", "").replace(",", "").strip()
+        return max(0, min(99, int(round(float(v)))))
+    except Exception:
+        return int(default)
+
+
+def _agent365_count_hub(kind: str) -> int:
+    try:
+        data = external_hub_load(kind) if "external_hub_load" in globals() else {}
+        if isinstance(data, list):
+            return len(data)
+        if isinstance(data, dict) and data:
+            # Apps Script 허브가 최신 1건만 돌려주는 경우도 카운트 1로 인정
+            return int(data.get("count", 1) or 1)
+    except Exception:
+        pass
+    return 0
+
+
+def _agent365_signal_scores(row: Dict[str, Any]) -> Dict[str, int]:
+    row = dict(row or {})
+    live_rows = _agent365_safe_pct(row.get("실시간행수", row.get("출전두수", 0)), 0)
+    api_rows = _agent365_safe_pct(row.get("API상태행수", row.get("API호출대상", 0)), 0)
+    learn_count = _agent365_count_hub("learning_bigdata")
+    runs_count = _agent365_count_hub("agent_runs") + _agent365_count_hub("agent_365_runs")
+    has_three = 1 if (row.get("안정형6") or row.get("변수형6") or row.get("고배당형6")) else 0
+    has_result = 1 if str(row.get("결과마번", "")).strip() not in ["", "결과대기", "None", "nan"] else 0
+    data_status = str(row.get("데이터상태", ""))
+    verified = 1 if str(row.get("실전검증", "")).upper() in ["Y", "TRUE", "1"] else 0
+
+    data_score = min(100, live_rows * 8 + api_rows * 3 + has_three * 15 + verified * 15)
+    learn_score = min(100, learn_count * 6 + runs_count * 4 + has_result * 10)
+    risk_penalty = 0
+    risk_text = " ".join(str(row.get(k, "")) for k in ["위험도", "상태", "구름", "AI에이전트요약", "근거", "데이터상태"])
+    for word, penalty in [("출전취소", 25), ("기수변경", 12), ("주로불량", 10), ("샘플", 25), ("대기", 8), ("표시불가", 30), ("오류", 12), ("실패", 10)]:
+        if word in risk_text or word in data_status:
+            risk_penalty += penalty
+    risk_penalty = min(45, risk_penalty)
+    return {
+        "자료점수": int(data_score),
+        "학습점수": int(learn_score),
+        "위험감점": int(risk_penalty),
+        "허브학습건수": int(learn_count),
+        "에이전트실행건수": int(runs_count),
+        "실시간행수": int(live_rows),
+        "검증됨": int(verified),
+    }
+
+
+def _agent365_probability(row: Dict[str, Any]) -> Dict[str, Any]:
+    row = dict(row or {})
+    sig = _agent365_signal_scores(row)
+    base = 38
+    total = base + sig["자료점수"] * 0.24 + sig["학습점수"] * 0.18 - sig["위험감점"] * 0.52
+    trust = max(18, min(88, int(round(total))))
+    stable = max(20, min(90, trust + 7 - sig["위험감점"] // 6))
+    variable = max(15, min(84, trust - 2 + min(12, sig["위험감점"] // 4)))
+    high = max(8, min(72, trust - 12 + min(18, sig["학습점수"] // 8)))
+    data_enough = max(10, min(95, int(round(sig["자료점수"] * 0.65 + sig["학습점수"] * 0.35))))
+    risk_level = max(5, min(95, 100 - trust + sig["위험감점"]))
+    return {
+        "AI확률버전": AGENT365_VERSION,
+        "AI종합확률": f"{trust}%",
+        "안정형확률": f"{stable}%",
+        "변수형확률": f"{variable}%",
+        "고배당형확률": f"{high}%",
+        "자료충분도": f"{data_enough}%",
+        "위험도확률": f"{risk_level}%",
+        "허브학습건수": sig["허브학습건수"],
+        "에이전트실행건수": sig["에이전트실행건수"],
+        "확률주의": "적중 보장 아님 · 허브/공식자료/과거학습 기반 참고 확률 · 자동구매/자동결제 없음",
+    }
+
+
+def _apply_agent365_probability(row: Dict[str, Any]) -> Dict[str, Any]:
+    row = dict(row or {})
+    try:
+        prob = _agent365_probability(row)
+        row.update(prob)
+        row["365AI상태"] = "해·달·별·구름·비 5명 에이전트 활동중"
+        row["365AI업무"] = "자료찾기·허브저장·학습·분석·추천·성공/실패 원인기록"
+    except Exception as e:
+        row["365AI상태"] = f"확률계산 대기: {str(e)[:80]}"
+    return row
+
+
+def _agent365_failure_reason(row: Dict[str, Any]) -> Dict[str, Any]:
+    row = dict(row or {})
+    hit = str(row.get("적중여부", row.get("결과", ""))).strip()
+    result_nums = str(row.get("결과마번", "")).strip()
+    reasons = []
+    text = " ".join(str(row.get(k, "")) for k in ["근거", "AI에이전트요약", "상태", "위험도", "데이터상태"])
+    for word in ["출전취소", "기수변경", "체중", "게이트", "주로", "날씨", "배당", "인기", "API", "대기", "샘플"]:
+        if word in text:
+            reasons.append(word)
+    if not reasons:
+        reasons.append("결과대기" if not result_nums or result_nums == "결과대기" else "패턴차이")
+    return {
+        "저장시각": now_str() if "now_str" in globals() else str(_agent365_now()),
+        "날짜": row.get("날짜", today_kst() if "today_kst" in globals() else ""),
+        "경마장": row.get("경마장", ""),
+        "경주번호": row.get("경주번호", ""),
+        "추천": {
+            "안정형대표": row.get("안정형대표", ""),
+            "변수형대표": row.get("변수형대표", row.get("변수대응형대표", "")),
+            "고배당형대표": row.get("고배당형대표", ""),
+        },
+        "결과마번": result_nums or "결과대기",
+        "적중여부": hit or "결과대기",
+        "원인후보": reasons[:8],
+        "확률": _agent365_probability(row),
+        "메모": "결과가 들어오면 성공/실패 원인을 learning_bigdata와 failure_reason_log에 누적",
+    }
+
+
+def _agent365_tick(source: str = "screen", row: Dict[str, Any] = None) -> Dict[str, Any]:
+    """화면 실행/웹앱 호출 때마다 가볍게 365일 에이전트 활동 기록을 남김."""
+    now = _agent365_now()
+    row = _apply_agent365_probability(dict(row or {}))
+    status = {
+        "저장시각": now_str() if "now_str" in globals() else str(now),
+        "버전": AGENT365_VERSION,
+        "실행출처": source,
+        "365일운영": "ON",
+        "PC꺼짐대응": "Streamlit Cloud + Apps Script 시간트리거 사용 시 가능",
+        "해": "총괄 판단 · 확률/전략 균형",
+        "달": "일정·경주없음·수집시간 감시",
+        "별": "공식API/허용 공개자료 확인",
+        "구름": "변수·허브·오류 복구",
+        "비": "결과·배당·성공/실패 원인학습",
+        "확률": _agent365_probability(row),
+        "자동구매": "없음",
+        "자동결제": "없음",
+    }
+    try:
+        if "external_hub_save" in globals():
+            external_hub_save("agent_365_runs", status)
+            external_hub_save("agent_365_probability", status.get("확률", {}))
+            external_hub_save("failure_reason_log", _agent365_failure_reason(row))
+    except Exception:
+        pass
+    return status
+
+
+def render_agent365_control_center(compact: bool = False) -> None:
+    try:
+        latest = load_mobile_recommend_json() if "load_mobile_recommend_json" in globals() else {}
+    except Exception:
+        latest = {}
+    latest = _apply_agent365_probability(latest)
+    status = _agent365_tick("mobile" if compact else "pc", latest)
+    if compact:
+        p = status.get("확률", {})
+        st.markdown(f"""
+        <div style="border:2px solid #d5a83c;border-radius:18px;padding:12px;background:#090909;color:#fff;margin:10px 0;text-align:center;">
+          <div style="color:#f8d777;font-weight:1000;font-size:1.05rem;">365일 5 AI 에이전트 확률판</div>
+          <div style="font-size:2.1rem;font-weight:1000;color:#fff;line-height:1.05;">종합 {p.get('AI종합확률','-')}</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:8px;">
+            <div>안정<br><b>{p.get('안정형확률','-')}</b></div>
+            <div>변수<br><b>{p.get('변수형확률','-')}</b></div>
+            <div>고배당<br><b>{p.get('고배당형확률','-')}</b></div>
+          </div>
+          <div style="font-size:.82rem;color:#cbd5e1;margin-top:8px;">자료 {p.get('자료충분도','-')} · 위험 {p.get('위험도확률','-')} · 적중보장 아님</div>
+        </div>
+        """, unsafe_allow_html=True)
+        return
+    st.markdown("### 🤖 365일 5 AI 에이전트 자동활동")
+    st.success("해·달·별·구름·비가 허브 자료를 찾아 저장·학습·분석·추천·성공/실패 원인 기록을 남깁니다.")
+    st.json(status)
+    st.caption("완전 무인 365일 활동은 Streamlit 화면 실행만으로는 부족하므로, 함께 들어있는 Apps Script 시간트리거를 구글시트에 배포해야 안정적입니다.")
+
+
+# 기존 모바일 3분류 화면을 확률판 포함 버전으로 다시 정의합니다.
+def _render_mobile_compact_3type_view(row: Dict[str, Any]) -> None:
+    row = dict(row or {})
+    try:
+        if "_build_three_type_recommendation" in globals():
+            row = _build_three_type_recommendation(row)
+        row = _apply_agent365_probability(row)
+    except Exception:
+        pass
+
+    meet = _safe_mobile_val(row, "경마장", default="서울")
+    race_no = _safe_mobile_val(row, "경주번호", default="-")
+    race_time = _safe_mobile_val(row, "경주시간", "출발시간", default="-")
+    status = _safe_mobile_val(row, "상태", "데이터상태", default="대기")
+    saved = _safe_mobile_val(row, "저장시각", default="-")
+    stable_rep = _safe_mobile_val(row, "안정형대표", default="-")
+    stable_6 = _format_6_for_mobile(row.get("안정형6", ""))
+    stable_reason = _safe_mobile_val(row, "안정형근거", default="최근폼·기수·주로 안정성 우선")
+    var_rep = _safe_mobile_val(row, "변수형대표", "변수대응형대표", default="-")
+    var_6 = _format_6_for_mobile(row.get("변수형6", row.get("변수대응형6", "")))
+    var_reason = _safe_mobile_val(row, "변수형근거", "변수대응형근거", default="체중·게이트·주로·기수 변경 대응")
+    high_rep = _safe_mobile_val(row, "고배당형대표", default="-")
+    high_6 = _format_6_for_mobile(row.get("고배당형6", ""))
+    high_reason = _safe_mobile_val(row, "고배당형근거", default="배당 대비 기대값 우선")
+    amount = _safe_mobile_val(row, "총추천금액", "추천금액", default="18,000원")
+    unit = _safe_mobile_val(row, "단위금액", default="1,000원")
+    auto = _safe_mobile_val(row, "자동화모드", default="Y")
+    p_total = row.get("AI종합확률", "-")
+    p_stable = row.get("안정형확률", "-")
+    p_var = row.get("변수형확률", "-")
+    p_high = row.get("고배당형확률", "-")
+    p_data = row.get("자료충분도", "-")
+    p_risk = row.get("위험도확률", "-")
+
+    row = _mobile_drop_placeholder_combos(row) if "_mobile_drop_placeholder_combos" in globals() else row
+    if "_mobile_has_any_real_recommend" in globals() and not _mobile_has_any_real_recommend(row):
+        _render_mobile_end_or_wait_view(row)
+        render_agent365_control_center(compact=True)
+        return
+    st.markdown(_mobile_real_compact_css(), unsafe_allow_html=True)
+    st.markdown(f"""
+    <div class="mk-wrap">
+      <div class="mk-top">
+        <div class="mk-small">MARU KRA · 365일 5 AI 에이전트</div>
+        <div class="mk-title">{meet} {race_no}R <span class="mk-gold">삼쌍승 18장</span></div>
+        <div class="mk-small">경주시간 {race_time} · 기준 {amount} · 각 {unit}</div>
+      </div>
+      <div class="mk-status">상태: {status} · 저장 {saved}</div>
+      <div style="border:2px solid #d5a83c;border-radius:18px;padding:12px;background:#090909;color:#fff;margin:10px 0;text-align:center;">
+        <div style="color:#f8d777;font-weight:1000;font-size:1.0rem;">확률판 · 적중보장 아님</div>
+        <div style="font-size:2.25rem;font-weight:1000;line-height:1.05;">AI 종합 {p_total}</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px;margin-top:8px;">
+          <div>안정형<br><b>{p_stable}</b></div>
+          <div>변수형<br><b>{p_var}</b></div>
+          <div>고배당<br><b>{p_high}</b></div>
+        </div>
+        <div style="font-size:.84rem;color:#cbd5e1;margin-top:8px;">자료충분도 {p_data} · 위험도 {p_risk}</div>
+      </div>
+      <div class="mk-grid">
+        <div class="mk-card"><h3>① 안정형 6장</h3><div class="mk-rep">{stable_rep}</div><div class="mk-six">{stable_6}</div><div class="mk-reason">확률 {p_stable} · {stable_reason}</div></div>
+        <div class="mk-card"><h3>② 변수형 6장</h3><div class="mk-rep">{var_rep}</div><div class="mk-six">{var_6}</div><div class="mk-reason">확률 {p_var} · {var_reason}</div></div>
+        <div class="mk-card"><h3>③ 고배당형 6장</h3><div class="mk-rep">{high_rep}</div><div class="mk-six">{high_6}</div><div class="mk-reason">확률 {p_high} · {high_reason}</div></div>
+      </div>
+      <div class="mk-note">해·달·별·구름·비 5명 활동 · 자료찾기/학습/성공실패 원인기록 · 자동구매/자동결제 없음</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    try:
+        _agent365_tick("mobile_recommend_render", row)
+    except Exception:
+        pass
+    copy_text = _three_type_mobile_ticket(row) if "_three_type_mobile_ticket" in globals() else str(row.get("구매표복사", ""))
+    c1, c2 = st.columns(2)
+    with c1:
+        st.download_button("📋 18장 텍스트", copy_text, file_name=f"maru_{meet}_{race_no}R_18tickets.txt")
+    with c2:
+        st.link_button("↗ 더비온 열기", "https://www.derbyon.co.kr")
+
+
+
+# =============================================================================
+# MARU KRA HUB 365 FINAL CORE
+# 목적:
+# - 에이전트 명칭보다 먼저, 허브가 자료를 불러오고 저장하고 분석·추천하는 중심 엔진으로 작동
+# - 경주 있는 날/없는 날을 구분하여 허브 작업을 다르게 수행
+# - PC는 확인용, 모바일은 mobile_recommend 추천 결과만 표시
+# - 구글시트 ID는 앱 안에 고정 포함, 입력창 없음
+# - 자동구매/자동결제 없음
+# =============================================================================
+MARU_KRA_FIXED_SHEET_ID = "1uT8lQfbpjhblvFOsFdBSmAnGHXzqhlZQ5jsBayLTpwo"
+MARU_KRA_FIXED_GID = "909440003"
+MARU_KRA_HUB365_VERSION = "cloud_hub_365_final_v1"
+MARU_KRA_HUB_KINDS_FINAL = [
+    "mobile_recommend",
+    "three_type_recommend",
+    "learning_bigdata",
+    "api_status",
+    "api_raw_cache",
+    "pre_saved_data",
+    "live_api_data",
+    "race_calendar",
+    "success_fail_reason",
+    "failure_reason_log",
+    "probability_memory",
+    "strategy_memory",
+    "agent_runs",
+    "agent_365_runs",
+    "hub_365_status",
+]
+MARU_KRA_MANUAL_PURCHASE_URL = "https://www.derbyon.co.kr"
+
+
+def _hub365_now():
+    try:
+        return now_kst()
+    except Exception:
+        try:
+            return datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=9)))
+        except Exception:
+            return datetime.datetime.now()
+
+
+def _hub365_now_str():
+    try:
+        return now_str()
+    except Exception:
+        return _hub365_now().strftime("%Y-%m-%d %H:%M:%S KST")
+
+
+def _hub365_today():
+    try:
+        return today_kst()
+    except Exception:
+        return _hub365_now().strftime("%Y%m%d")
+
+
+def _hub365_safe_load(kind: str):
+    try:
+        if "external_hub_load" in globals():
+            x = external_hub_load(kind)
+            if isinstance(x, dict):
+                return x
+            if isinstance(x, list):
+                return {"rows": x, "count": len(x)}
+    except Exception:
+        pass
+    return {}
+
+
+def _hub365_safe_save(kind: str, payload: dict) -> bool:
+    payload = dict(payload or {})
+    payload.setdefault("저장시각", _hub365_now_str())
+    payload.setdefault("허브버전", MARU_KRA_HUB365_VERSION)
+    payload.setdefault("SHEET_ID", MARU_KRA_FIXED_SHEET_ID)
+    payload.setdefault("자동구매", "없음")
+    payload.setdefault("자동결제", "없음")
+    ok = False
+    try:
+        if "external_hub_save" in globals():
+            ok = bool(external_hub_save(kind, payload))
+    except Exception:
+        ok = False
+    try:
+        d = DATA_DIR if "DATA_DIR" in globals() else Path("maru_kra_data")
+        d.mkdir(parents=True, exist_ok=True)
+        (d / f"{kind}.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        ok = True or ok
+    except Exception:
+        pass
+    return ok
+
+
+def _hub365_count(kind: str) -> int:
+    data = _hub365_safe_load(kind)
+    try:
+        if isinstance(data, dict):
+            if isinstance(data.get("rows"), list):
+                return len(data.get("rows") or [])
+            if data.get("count") not in [None, ""]:
+                return int(float(str(data.get("count")).replace(",", "")))
+            return 1 if data else 0
+    except Exception:
+        return 0
+    return 0
+
+
+def _hub365_schedule_rows(rc_date: str = None) -> int:
+    rc_date = rc_date or _hub365_today()
+    total = 0
+    try:
+        for meet_name in ["서울", "부산경남", "제주"]:
+            try:
+                if "_load_schedule_for_sidebar" in globals():
+                    sched = _load_schedule_for_sidebar(rc_date, meet_name)
+                elif "load_schedule" in globals():
+                    sched = load_schedule(rc_date, meet_name)
+                else:
+                    sched = pd.DataFrame()
+                total += int(len(sched)) if sched is not None else 0
+            except Exception:
+                continue
+    except Exception:
+        total = 0
+    return total
+
+
+def _hub365_is_race_day(rc_date: str = None) -> tuple:
+    """경주일 판단: 일정 API/허브가 있으면 그 결과를 우선, 없으면 금토일 가능성 표시."""
+    rc_date = rc_date or _hub365_today()
+    rows = _hub365_schedule_rows(rc_date)
+    if rows > 0:
+        return True, f"경주일정 {rows}건 확인", rows
+    try:
+        wd = _hub365_now().weekday()  # 월0
+        if wd in [4, 5, 6]:
+            return True, "일정 API 0건이지만 금·토·일 경주 가능일 · 출전표/일정 재확인", 0
+    except Exception:
+        pass
+    return False, "경주일정 0건 · 경주 없는 날 또는 공개 전", 0
+
+
+def _hub365_phase(latest: dict = None) -> dict:
+    latest = dict(latest or {})
+    now = _hub365_now()
+    rc_date = str(latest.get("날짜") or _hub365_today())
+    is_race, reason, schedule_rows = _hub365_is_race_day(rc_date)
+    hour = int(getattr(now, "hour", 0))
+    if not is_race:
+        code = "NO_RACE_DAY"
+        title = "경주 없는 날 · 학습/복습/준비 모드"
+        job = "허브자료 정리, 성공/실패 원인 누적, 다음 경주 대비"
+    elif hour < 9:
+        code = "RACE_PREPARE"
+        title = "경주 당일 오전 · 준비 모드"
+        job = "출전표/말/기수/과거자료 확인, 1차 예비 분석"
+    elif hour < 17:
+        code = "RACE_LIVE"
+        title = "경주 진행 시간 · 실시간 추천 모드"
+        job = "실시간 API/배당/체중/변수 반영, mobile_recommend 저장"
+    else:
+        code = "RACE_REVIEW"
+        title = "경주 후 · 복기/학습 모드"
+        job = "결과/배당 확인, 성공·실패 원인 분석, 확률 보정"
+    return {
+        "코드": code,
+        "제목": title,
+        "작업": job,
+        "판단근거": reason,
+        "경주일정건수": schedule_rows,
+        "날짜": rc_date,
+        "시각": _hub365_now_str(),
+    }
+
+
+def _hub365_probability_from_hub(latest: dict = None) -> dict:
+    latest = dict(latest or {})
+    try:
+        if "_agent365_probability" in globals():
+            base = _agent365_probability(latest)
+            if isinstance(base, dict) and base:
+                base["확률기준"] = "허브/공식자료/과거학습 기반 참고 확률"
+                return base
+    except Exception:
+        pass
+    live_rows = 0
+    try:
+        live_rows = int(float(str(latest.get("실시간행수", 0) or 0).replace(",", "")))
+    except Exception:
+        live_rows = 0
+    learn = _hub365_count("learning_bigdata") + _hub365_count("success_fail_reason") + _hub365_count("failure_reason_log")
+    rec = _hub365_count("mobile_recommend") + _hub365_count("three_type_recommend")
+    score = max(20, min(88, 40 + min(25, live_rows * 2) + min(20, learn) + min(8, rec)))
+    return {
+        "AI종합확률": f"{score}%",
+        "안정형확률": f"{min(92, score + 6)}%",
+        "변수형확률": f"{max(18, score - 2)}%",
+        "고배당형확률": f"{max(8, score - 14)}%",
+        "자료충분도": f"{max(15, min(95, 35 + min(40, learn) + min(20, live_rows * 2)))}%",
+        "위험도확률": f"{max(5, min(95, 100 - score + 10))}%",
+        "확률주의": "적중 보장 아님 · 자동구매/자동결제 없음 · 사용자가 직접 확인 후 수동 구매",
+        "확률기준": "허브/공식자료/과거학습 기반 참고 확률",
+    }
+
+
+def _hub365_failure_lesson(latest: dict = None, phase: dict = None) -> dict:
+    latest = dict(latest or {})
+    phase = dict(phase or _hub365_phase(latest))
+    text = " ".join(str(latest.get(k, "")) for k in ["근거", "상태", "데이터상태", "위험도", "안정형근거", "변수형근거", "고배당형근거"])
+    candidates = []
+    for w in ["체중", "게이트", "기수변경", "주로", "날씨", "배당", "인기", "출전취소", "API", "대기", "샘플", "자료부족"]:
+        if w in text:
+            candidates.append(w)
+    if not candidates:
+        candidates = ["결과대기"] if phase.get("코드") != "RACE_REVIEW" else ["패턴차이", "배당변동", "변수반영부족"]
+    return {
+        "저장시각": _hub365_now_str(),
+        "날짜": phase.get("날짜", _hub365_today()),
+        "현재모드": phase.get("코드"),
+        "경마장": latest.get("경마장", ""),
+        "경주번호": latest.get("경주번호", ""),
+        "추천상태": latest.get("데이터상태", latest.get("상태", "")),
+        "적중여부": latest.get("적중여부", "결과대기"),
+        "결과마번": latest.get("결과마번", "결과대기"),
+        "원인후보": ", ".join(candidates[:8]),
+        "다음보정": "원인후보를 다음 추천 가중치와 probability_memory에 반영",
+        "자동구매": "없음",
+    }
+
+
+def _hub365_status_tick(source: str = "screen", latest: dict = None) -> dict:
+    latest = dict(latest or {})
+    phase = _hub365_phase(latest)
+    prob = _hub365_probability_from_hub(latest)
+    lesson = _hub365_failure_lesson(latest, phase)
+    status = {
+        "저장시각": _hub365_now_str(),
+        "버전": MARU_KRA_HUB365_VERSION,
+        "실행출처": source,
+        "SHEET_ID": MARU_KRA_FIXED_SHEET_ID,
+        "GID": MARU_KRA_FIXED_GID,
+        "허브중심": "ON",
+        "PC역할": "확인용/관리용",
+        "모바일역할": "mobile_recommend 최신 추천 결과만 표시",
+        "현재모드": phase,
+        "확률": prob,
+        "허브자료현황": {k: _hub365_count(k) for k in MARU_KRA_HUB_KINDS_FINAL[:12]},
+        "5명역할": {
+            "해": "허브 자료 종합 판단 / 최종 확률 / 추천 균형",
+            "달": "경주 있는 날·없는 날 구분 / 시간대 모드 전환",
+            "별": "공식 API·허브 원자료 확인 / 수집상태 기록",
+            "구름": "날씨·주로·체중·게이트·기수변경·배당변동 감지",
+            "비": "결과·배당 검증 / 성공·실패 원인 학습",
+        },
+        "자동구매": "없음",
+        "자동결제": "없음",
+        "마권구매": "더비온 등 공식 구매 페이지에서 사용자가 직접 입력·확정",
+    }
+    _hub365_safe_save("hub_365_status", status)
+    _hub365_safe_save("agent_365_runs", status)
+    _hub365_safe_save("success_fail_reason", lesson)
+    _hub365_safe_save("probability_memory", prob)
+    return status
+
+
+def _hub365_make_no_race_mobile_status(latest: dict = None) -> dict:
+    latest = dict(latest or {})
+    phase = _hub365_phase(latest)
+    prob = _hub365_probability_from_hub(latest)
+    row = dict(latest or {})
+    row.update({
+        "저장시각": _hub365_now_str(),
+        "날짜": phase.get("날짜", _hub365_today()),
+        "상태": phase.get("제목"),
+        "데이터상태": "경주없음/학습중" if phase.get("코드") == "NO_RACE_DAY" else "준비/분석중",
+        "365AI상태": "허브 중심 365일 학습·분석 활동중",
+        "365AI업무": phase.get("작업"),
+        "자동구매": "없음",
+        "자동결제": "없음",
+        "확률주의": "적중 보장 아님 · 경주가 없으면 추천을 억지로 만들지 않음",
+    })
+    row.update(prob)
+    return row
+
+
+def run_hub365_cycle(source: str = "manual") -> dict:
+    """허브 중심 365일 1회 실행. 경주 없는 날은 학습/복습, 경주 있는 날은 추천/상태저장 중심."""
+    latest = {}
+    try:
+        latest = load_mobile_recommend_json() if "load_mobile_recommend_json" in globals() else _hub365_safe_load("mobile_recommend")
+    except Exception:
+        latest = _hub365_safe_load("mobile_recommend")
+    latest = dict(latest or {})
+    phase = _hub365_phase(latest)
+    status = _hub365_status_tick(source, latest)
+
+    if phase.get("코드") == "NO_RACE_DAY":
+        # 경주 없는 날에는 추천을 새로 꾸며내지 않고, 상태/학습 로그를 남긴다.
+        no_race_row = _hub365_make_no_race_mobile_status(latest)
+        if not latest:
+            try:
+                save_mobile_recommend_json(no_race_row)
+            except Exception:
+                _hub365_safe_save("mobile_recommend", no_race_row)
+        _hub365_safe_save("learning_bigdata", {
+            "저장시각": _hub365_now_str(),
+            "분류": "NO_RACE_DAY_LEARNING",
+            "학습내용": "경주 없는 날: 과거 추천/결과/배당/변수 패턴 복습",
+            "성공실패원인": _hub365_failure_lesson(latest, phase),
+            "다음작업": "다음 경주 출전표 공개 시 pre_saved_data/live_api_data 보강",
+        })
+    elif phase.get("코드") in ["RACE_PREPARE", "RACE_LIVE"]:
+        # 경주 있는 날에는 가능하면 기존 안정 수집/분석 루틴을 실행하고, 실패해도 허브 상태는 남긴다.
+        try:
+            meet = latest.get("경마장") or "서울"
+            race_no = int(float(latest.get("경주번호") or 1))
+            if "stable_fetch_batch_and_analyze" in globals():
+                data, api_status, rec = stable_fetch_batch_and_analyze(phase.get("날짜"), meet, race_no, max_count=26, retry=1)
+                if isinstance(rec, dict) and rec:
+                    rec.update(_hub365_probability_from_hub(rec))
+                    save_mobile_recommend_json(rec)
+                    _hub365_safe_save("three_type_recommend", rec)
+                    _hub365_safe_save("live_api_data", {"날짜": phase.get("날짜"), "경마장": meet, "경주번호": race_no, "API상태": "수집/분석 시도"})
+        except Exception as e:
+            _hub365_safe_save("api_status", {"상태": "경주일 자동수집 실패", "오류": str(e)[:200], "앱중단": "N"})
+    else:
+        _hub365_safe_save("learning_bigdata", {
+            "저장시각": _hub365_now_str(),
+            "분류": "RACE_REVIEW",
+            "학습내용": "경주 후 결과/배당/추천 성공실패 원인 정리",
+            "성공실패원인": _hub365_failure_lesson(latest, phase),
+        })
+    return status
+
+
+def render_hub365_final_center(compact: bool = False) -> None:
+    try:
+        latest = load_mobile_recommend_json() if "load_mobile_recommend_json" in globals() else {}
+    except Exception:
+        latest = {}
+    status = _hub365_status_tick("mobile" if compact else "pc", latest)
+    phase = status.get("현재모드", {})
+    prob = status.get("확률", {})
+    if compact:
+        st.markdown(f"""
+        <div style="border:2px solid #d5a83c;border-radius:18px;padding:12px;background:#0b0b0b;color:white;margin:10px 0;text-align:center;">
+          <div style="color:#f8d777;font-weight:1000;">MARU KRA 허브 365</div>
+          <div style="font-size:1rem;font-weight:900;">{phase.get('제목','허브 활동중')}</div>
+          <div style="font-size:2.05rem;font-weight:1000;line-height:1.05;">AI 종합 {prob.get('AI종합확률','-')}</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px;margin-top:8px;">
+            <div>안정<br><b>{prob.get('안정형확률','-')}</b></div>
+            <div>변수<br><b>{prob.get('변수형확률','-')}</b></div>
+            <div>고배당<br><b>{prob.get('고배당형확률','-')}</b></div>
+          </div>
+          <div style="font-size:.82rem;color:#cbd5e1;margin-top:8px;">자료 {prob.get('자료충분도','-')} · 위험 {prob.get('위험도확률','-')} · 자동구매 없음</div>
+        </div>
+        """, unsafe_allow_html=True)
+        return
+    st.markdown("### 🧠 MARU KRA 허브 중심 365 추천 시스템")
+    st.success("허브가 자료를 불러오고 저장하며, 앱이 분석·추천·성공/실패 원인을 다시 허브에 남깁니다. PC는 확인용, 모바일은 추천 결과판입니다.")
+    a, b, c, d = st.columns(4)
+    a.metric("현재모드", phase.get("코드", "-"))
+    b.metric("경주일정", f"{phase.get('경주일정건수',0)}건")
+    c.metric("AI 종합", prob.get("AI종합확률", "-"))
+    d.metric("자료충분도", prob.get("자료충분도", "-"))
+    st.info(f"{phase.get('제목','')} · {phase.get('작업','')}")
+    st.caption(f"Google Sheet ID 고정 포함: {MARU_KRA_FIXED_SHEET_ID} / gid {MARU_KRA_FIXED_GID} · 입력창 없음")
+    c1, c2, c3 = st.columns(3)
+    if c1.button("🔁 허브 365 1회 실행", use_container_width=True, key="hub365_cycle_manual"):
+        run_hub365_cycle("pc_button")
+        st.success("허브 365 실행 완료 · 상태/확률/성공실패 원인을 허브에 저장했습니다.")
+        st.rerun()
+    c2.link_button("📗 고정 구글시트 허브 열기", f"https://docs.google.com/spreadsheets/d/{MARU_KRA_FIXED_SHEET_ID}/edit#gid={MARU_KRA_FIXED_GID}", use_container_width=True)
+    c3.link_button("↗ 더비온 열기", MARU_KRA_MANUAL_PURCHASE_URL, use_container_width=True)
+    with st.expander("허브 자료 현황 / 5명 역할 / 저장 상태", expanded=False):
+        st.json(status)
+
+
+# 기존 PC/모바일 호출부가 이 이름을 사용하므로, 최종 허브 중심 센터로 덮어씁니다.
+def render_agent365_control_center(compact: bool = False) -> None:
+    render_hub365_final_center(compact=compact)
 
 
 if __name__ == "__main__":
