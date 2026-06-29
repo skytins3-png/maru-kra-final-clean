@@ -9216,7 +9216,7 @@ def render() -> None:
                     st.warning("API Key를 입력해 주세요.")
 
         rc_date = st.text_input("분석 날짜", value=today_kst())
-        race_scope = st.selectbox("운영 범위", ["전체 경마장 자동", "선택 경마장/경주"], index=0, help="전체 경마장 자동은 서울·부산경남·제주 모든 경주일정을 확인합니다. 서울 1R에 고정하지 않습니다.")
+        race_scope = st.selectbox("운영 범위", ["전체 경마장 자동", "선택 경마장/경주"], index=1, help="기본은 선택 경마장/경주 확인용입니다. 전체 경마장 자동은 버튼을 눌렀을 때만 실행되어 계속 도는 현상을 막습니다.")
         st.session_state["race_scope"] = race_scope
         if race_scope == "전체 경마장 자동":
             meet = "전체"
@@ -9261,7 +9261,11 @@ def render() -> None:
     tab1, tab2, tab3, tab4, tab5 = st.tabs(["🏇 실시간 분석", "🎯 삼쌍승18장/배당", "🔌 API/허브", "⏱ 스마트수집", "📘 도움말"])
     with tab1:
         if st.session_state.get("race_scope") == "전체 경마장 자동":
-            render_all_meet_all_race_monitor(rc_date, selected, int(sim_count), risk_mode)
+            st.info("전체 경마장 자동 모드는 화면 진입만으로 API를 돌리지 않습니다. 아래 버튼을 누를 때만 1회 실행합니다.")
+            if st.button("🌐 전체 경마장 관제 1회 실행", key="run_all_meet_once_tab1", width="stretch"):
+                render_all_meet_all_race_monitor(rc_date, selected, int(sim_count), risk_mode)
+            else:
+                st.caption("대기 중 · PC 확인 화면은 멈춰 있고, 허브/모바일 추천은 저장된 결과를 사용합니다.")
             score_df, result, combos, data, status, env = pd.DataFrame(), {}, [], st.session_state.get("live_data", {}), st.session_state.get("api_status", pd.DataFrame()), {}
         else:
             score_df, result, combos, data, status, env = render_live_panel(rc_date, meet, int(race_no), selected, int(sim_count), risk_mode)
@@ -9306,7 +9310,9 @@ def render() -> None:
         render_file_and_runtime_check_center()  # FILE_RUNTIME_CHECK_TAB_APPLY
     with tab4:
         if st.session_state.get("race_scope") == "전체 경마장 자동":
-            render_all_meet_all_race_monitor(rc_date, selected, int(sim_count), risk_mode)
+            st.info("스마트수집 탭도 자동 실행하지 않습니다. 필요할 때만 1회 실행하세요.")
+            if st.button("⏱ 전체 경마장 스마트수집 1회 실행", key="run_all_meet_once_tab4", width="stretch"):
+                render_all_meet_all_race_monitor(rc_date, selected, int(sim_count), risk_mode)
         else:
             render_smart_collection_panel(rc_date, meet, int(race_no))
     with tab5:
