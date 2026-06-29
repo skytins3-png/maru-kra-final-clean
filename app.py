@@ -8189,7 +8189,14 @@ def render_sequential_26api_center(rc_date: str, meet: str, race_no: Any) -> Non
         race_no2 = 1
 
     target = _seq_target_id(rc_date, meet2, race_no2)
-    widget_scope = _seq_widget_scope(target)
+    # StreamlitDuplicateElementKey 방지: 같은 화면에서 순차 API 센터가 2번 렌더링되어도
+    # 위젯 key가 충돌하지 않도록 실행 1회 안에서 호출 번호를 붙입니다.
+    global _SEQ_RENDER_CALL_COUNTER
+    try:
+        _SEQ_RENDER_CALL_COUNTER += 1
+    except NameError:
+        _SEQ_RENDER_CALL_COUNTER = 1
+    widget_scope = f"{_seq_widget_scope(target)}_render{_SEQ_RENDER_CALL_COUNTER}"
 
     state = _load_seq_state()
     item = state.get(target)
