@@ -10779,11 +10779,6 @@ def run_hub365_cycle(source: str = "manual") -> dict:
             pass
     return status
 
-# 21ROUND: 이전 버전은 여기서 render()를 먼저 실행해 뒤쪽 20ROUND 패치가 적용되기 전에 화면을 만들었습니다.
-# 이 조기 진입점을 비활성화하고, 파일 맨 아래에서 모든 패치 정의 후 최종 진입합니다.
-def _maru_legacy_early_entrypoint_disabled_21round():
-    return None
-
 # =============================================================================
 # 20ROUND_HUB_SAVE_VISIBILITY_DIAGNOSTIC_FIX
 # 목적:
@@ -10907,118 +10902,17 @@ except Exception:
 
 
 # =============================================================================
-# 21ROUND_BOOT_SPIN_ENTRYPOINT_FIX
+# 23ROUND_FULL_RESTORE_SAFE_ENTRYPOINT
 # 목적:
-# - 재부팅/새로고침 때 무한 로딩처럼 보이는 원인을 줄입니다.
-# - 20ROUND 패치가 정의되기 전에 render()가 먼저 실행되던 조기 진입점을 제거했습니다.
-# - 최종 진입점은 파일 맨 아래 1곳으로 고정합니다.
-# - PC 일반 접속은 화면 확인만 수행하고, agent_tick=1 또는 버튼 클릭 때만 허브 작업을 실행합니다.
+# - 22ROUND 안전 부팅판에서 전체 대시보드가 사라진 것처럼 보이는 문제를 복구합니다.
+# - 기존 전체 기능은 삭제하지 않고 수동 버튼으로 열 수 있게 보존합니다.
+# - 일반 접속은 무거운 API/시트 자동실행 없이 먼저 화면만 뜹니다.
+# - Apps Script/Google Sheet URL 404 진단과 Secrets 진단을 짧게 확인합니다.
 # =============================================================================
-MARU_KRA_FINAL_PRECHECK_ROUND = "21ROUND"
-
-try:
-    _run_hub365_cycle_core_20round = run_hub365_cycle
-except Exception:
-    _run_hub365_cycle_core_20round = None
+MARU_KRA_FINAL_PRECHECK_ROUND = "23ROUND_FULL_RESTORE_SAFE_ENTRYPOINT"
 
 
-def _maru21_now() -> str:
-    try:
-        return _hub365_now_str() if "_hub365_now_str" in globals() else str(datetime.datetime.now())
-    except Exception:
-        return ""
-
-
-def _maru21_quick_health_payload(source: str, status: str = "BOOT_OK") -> dict:
-    payload = {
-        "저장시각": _maru21_now(),
-        "버전": "21ROUND_BOOT_SPIN_ENTRYPOINT_FIX",
-        "실행출처": source,
-        "상태": status,
-        "설명": "조기 render() 제거 · 재부팅 무한로딩 방지 · PC 일반 접속 자동수집 없음",
-        "자동구매": "없음",
-        "자동결제": "없음",
-    }
-    try:
-        payload["SHEET_ID"] = MARU_KRA_FIXED_SHEET_ID if "MARU_KRA_FIXED_SHEET_ID" in globals() else ""
-    except Exception:
-        pass
-    try:
-        payload["외부허브설정"] = _hub365_external_config_visible_20round() if "_hub365_external_config_visible_20round" in globals() else {}
-    except Exception:
-        payload["외부허브설정"] = {}
-    return payload
-
-
-def _maru21_safe_write(kind: str, payload: dict) -> dict:
-    """저장 통로 자체가 화면 로딩을 붙잡지 않도록 최대한 짧게 시도합니다."""
-    try:
-        if "_hub365_force_visible_save_20round" in globals():
-            return _hub365_force_visible_save_20round(kind, payload)
-    except Exception as e:
-        return {"kind": kind, "external_ok": "N", "local_ok": "N", "error": str(e)[:200]}
-    return {"kind": kind, "external_ok": "N", "local_ok": "N", "error": "save helper 없음"}
-
-
-def run_hub365_cycle(source: str = "manual") -> dict:
-    """21ROUND: 수동/트리거 실행은 20ROUND 코어를 사용하되, 실패 시 반드시 짧게 복구 응답을 반환합니다."""
-    source = str(source or "manual")
-    started = _maru21_now()
-    try:
-        _maru21_safe_write("hub_365_status", _maru21_quick_health_payload(source, "RUNNING_START"))
-    except Exception:
-        pass
-    try:
-        if callable(_run_hub365_cycle_core_20round):
-            out = _run_hub365_cycle_core_20round(source)
-        else:
-            out = {"ok": False, "오류": "20ROUND core 없음"}
-    except Exception as e:
-        out = {"ok": False, "오류": str(e)[:500], "자동구매": "없음", "자동결제": "없음"}
-    try:
-        done = _maru21_quick_health_payload(source, "DONE_OR_RETURNED")
-        done["시작시각"] = started
-        done["실행결과요약"] = out if isinstance(out, dict) else {"result": str(out)[:500]}
-        _maru21_safe_write("hub_365_status", done)
-    except Exception:
-        pass
-    return out if isinstance(out, dict) else {"result": str(out)[:500]}
-
-
-def _maru21_final_entrypoint() -> None:
-    """모든 패치가 정의된 뒤에 딱 한 번만 앱을 시작합니다."""
-    try:
-        is_tick = bool("_hub365_is_background_tick_request" in globals() and _hub365_is_background_tick_request())
-    except Exception:
-        is_tick = False
-    if is_tick:
-        try:
-            result = run_hub365_cycle("apps_script_tick")
-            st.write({"ok": True, "mode": "apps_script_tick", "round": "21ROUND", "result": result})
-        except Exception as e:
-            st.write({"ok": False, "mode": "apps_script_tick", "round": "21ROUND", "error": str(e)[:500]})
-        return
-    try:
-        render()
-    except Exception as e:
-        st.error("앱 화면 렌더링 중 오류가 발생했습니다. 재부팅 무한로딩 방지 화면입니다.")
-        st.code(str(e)[:1000])
-        st.write(_maru21_quick_health_payload("render_exception", "RENDER_EXCEPTION"))
-
-
-
-# =============================================================================
-# 22ROUND_BOOT_LITE_NO_SPIN_FIX
-# 목적:
-# - 재부팅/새로고침 때 무한 로딩을 막기 위해 일반 PC 진입 화면을 초경량으로 분리합니다.
-# - 일반 화면은 구글시트 읽기/26개 API/기존 전체 대시보드를 자동 실행하지 않습니다.
-# - 버튼도 긴 작업을 직접 물고 있지 않고, 짧은 진단/요청 기록만 수행합니다.
-# - 자동구매/자동결제 없음 유지.
-# =============================================================================
-MARU_KRA_FINAL_PRECHECK_ROUND = "22ROUND"
-
-
-def _maru22_mask(value: str) -> str:
+def _maru23_mask(value: str) -> str:
     value = str(value or "")
     if not value:
         return ""
@@ -11027,146 +10921,190 @@ def _maru22_mask(value: str) -> str:
     return value[:4] + "…" + value[-4:]
 
 
-def _maru22_secret_diag() -> dict:
+def _maru23_now() -> str:
+    try:
+        return _hub365_now_str() if "_hub365_now_str" in globals() else str(datetime.datetime.now())
+    except Exception:
+        return str(datetime.datetime.now())
+
+
+def _maru23_get_secret(name: str) -> str:
+    try:
+        v = str(st.secrets.get(name, "") or "").strip()
+        if v:
+            return v
+    except Exception:
+        pass
+    try:
+        return str(os.environ.get(name, "") or "").strip()
+    except Exception:
+        return ""
+
+
+def _maru23_secret_diag() -> dict:
     names = [
         "GOOGLE_SCRIPT_URL", "GOOGLE_APPS_SCRIPT_WEBAPP_URL", "GOOGLE_SCRIPT_TOKEN", "MARU_KRA_TOKEN",
         "KRA_API_KEY", "PUBLIC_DATA_API_KEY", "SERVICE_KEY", "DATA_GO_KR_SERVICE_KEY", "OPENAPI_SERVICE_KEY",
         "api_key", "serviceKey", "service_key",
     ]
     out = {}
-    for name in names:
-        val = ""
-        try:
-            val = str(st.secrets.get(name, "") or "").strip()
-        except Exception:
-            val = ""
-        if not val:
-            try:
-                val = str(os.environ.get(name, "") or "").strip()
-            except Exception:
-                val = ""
-        out[name] = {"감지": "Y" if bool(val) else "N", "미리보기": _maru22_mask(val), "길이": len(val) if val else 0}
+    for n in names:
+        v = _maru23_get_secret(n)
+        out[n] = {"감지": "Y" if bool(v) else "N", "미리보기": _maru23_mask(v), "길이": len(v) if v else 0}
     return out
 
 
-def _maru22_now() -> str:
-    try:
-        return _hub365_now_str() if "_hub365_now_str" in globals() else str(datetime.datetime.now())
-    except Exception:
-        return ""
+def _maru23_external_config() -> tuple:
+    url = _maru23_get_secret("GOOGLE_SCRIPT_URL") or _maru23_get_secret("GOOGLE_APPS_SCRIPT_WEBAPP_URL")
+    token = _maru23_get_secret("GOOGLE_SCRIPT_TOKEN") or _maru23_get_secret("MARU_KRA_TOKEN")
+    return url, token
 
 
-def _maru22_external_save_once(kind: str, payload: dict, timeout_sec: int = 4) -> dict:
-    """긴 저장 대기를 줄이기 위한 1회 짧은 저장. 실패해도 화면은 멈추지 않습니다."""
-    result = {"kind": kind, "external_ok": "N", "error": ""}
-    try:
-        url, token = _external_hub_config() if "_external_hub_config" in globals() else ("", "")
-    except Exception:
-        url, token = "", ""
+def _maru23_url_diag() -> dict:
+    url, token = _maru23_external_config()
+    return {
+        "url감지": "Y" if bool(url) else "N",
+        "url미리보기": (url[:35] + "…" + url[-10:]) if len(url) > 50 else url,
+        "url길이": len(url) if url else 0,
+        "exec끝": "Y" if str(url).endswith("/exec") else "N",
+        "축약문자포함": "Y" if ("…" in str(url) or "..." in str(url)) else "N",
+        "script주소형식": "Y" if str(url).startswith("https://script.google.com/macros/s/") else "N",
+        "token감지": "Y" if bool(token) else "N",
+    }
+
+
+def _maru23_quick_save(kind: str = "hub_365_status", timeout_sec: int = 4) -> dict:
+    url, token = _maru23_external_config()
+    payload = {
+        "저장시각": _maru23_now(),
+        "버전": "23ROUND_FULL_RESTORE_SAFE_ENTRYPOINT",
+        "kind": kind,
+        "상태": "QUICK_SAVE_TEST",
+        "설명": "전체 기능 복구판의 짧은 허브 저장 진단입니다.",
+        "자동구매": "없음",
+        "자동결제": "없음",
+    }
+    result = {"kind": kind, "external_ok": "N", "error": "", "url진단": _maru23_url_diag()}
     if not str(url).startswith("https://"):
-        result["error"] = "GOOGLE_SCRIPT_URL 없음"
+        result["error"] = "GOOGLE_SCRIPT_URL 없음 또는 https 아님"
+        return result
+    if "…" in str(url) or "..." in str(url):
+        result["error"] = "Apps Script URL에 축약문자(… 또는 ...)가 들어 있습니다. 전체 URL을 넣어야 합니다."
+        result["http_status"] = "SKIP"
         return result
     try:
-        body = {"action": "save", "kind": kind, "token": token, "payload": payload or {}, "saved_at": _maru22_now()}
+        body = {"action": "save", "kind": kind, "token": token, "payload": payload, "saved_at": _maru23_now()}
         r = requests.post(url, json=body, timeout=timeout_sec)
         result["http_status"] = getattr(r, "status_code", "")
         result["external_ok"] = "Y" if getattr(r, "status_code", 0) == 200 else "N"
+        try:
+            result["response_preview"] = str(r.text)[:300]
+        except Exception:
+            pass
     except Exception as e:
-        result["error"] = str(e)[:200]
+        result["error"] = str(e)[:300]
     return result
 
 
-def _maru22_external_load_once(kind: str = "mobile_recommend", timeout_sec: int = 5) -> dict:
-    result = {"ok": "N", "kind": kind, "payload": {}, "error": ""}
-    try:
-        url, token = _external_hub_config() if "_external_hub_config" in globals() else ("", "")
-    except Exception:
-        url, token = "", ""
+def _maru23_quick_load(kind: str = "mobile_recommend", timeout_sec: int = 5) -> dict:
+    url, token = _maru23_external_config()
+    result = {"ok": "N", "kind": kind, "payload": {}, "error": "", "url진단": _maru23_url_diag()}
     if not str(url).startswith("https://"):
-        result["error"] = "GOOGLE_SCRIPT_URL 없음"
+        result["error"] = "GOOGLE_SCRIPT_URL 없음 또는 https 아님"
+        return result
+    if "…" in str(url) or "..." in str(url):
+        result["error"] = "Apps Script URL에 축약문자(… 또는 ...)가 들어 있습니다. 전체 URL을 넣어야 합니다."
+        result["http_status"] = "SKIP"
         return result
     try:
         r = requests.get(url, params={"action": "load", "kind": kind, "token": token}, timeout=timeout_sec)
         result["http_status"] = getattr(r, "status_code", "")
         if getattr(r, "status_code", 0) == 200:
-            data = r.json()
-            payload = data.get("payload", data) if isinstance(data, dict) else {}
-            result["payload"] = payload if isinstance(payload, dict) else {}
+            try:
+                data = r.json()
+            except Exception:
+                data = {"raw": str(r.text)[:500]}
+            result["payload"] = data.get("payload", data) if isinstance(data, dict) else {}
             result["ok"] = "Y"
+        else:
+            try:
+                result["response_preview"] = str(r.text)[:300]
+            except Exception:
+                pass
     except Exception as e:
-        result["error"] = str(e)[:200]
+        result["error"] = str(e)[:300]
     return result
 
 
-def _maru22_status_payload(source: str, status: str) -> dict:
-    return {
-        "저장시각": _maru22_now(),
-        "버전": "22ROUND_BOOT_LITE_NO_SPIN_FIX",
-        "실행출처": source,
-        "상태": status,
-        "설명": "무한 로딩 방지를 위해 일반 화면은 자동 읽기/자동 수집을 하지 않습니다. 버튼은 짧은 진단만 수행합니다.",
-        "SHEET_ID": MARU_KRA_FIXED_SHEET_ID if "MARU_KRA_FIXED_SHEET_ID" in globals() else "",
-        "자동구매": "없음",
-        "자동결제": "없음",
-        "마권구매": "공식 구매 페이지에서 사용자가 직접 입력·확정",
-    }
-
-
-def _maru22_render_lite() -> None:
+def _maru23_render_safe_home() -> None:
     try:
-        st.set_page_config(page_title="MARU KRA 22ROUND SAFE", page_icon="🐎", layout="wide")
+        st.set_page_config(page_title="MARU KRA 23ROUND", page_icon="🐎", layout="wide")
     except Exception:
         pass
-    st.title("🐎 MARU KRA · 22ROUND 안전 부팅 화면")
-    st.success("앱 화면 먼저 뜨게 만든 무한로딩 방지판입니다.")
-    st.info("일반 접속은 구글시트 읽기, 26개 API 수집, 기존 대시보드를 자동 실행하지 않습니다.")
+    st.title("🐎 MARU KRA · 23ROUND 전체기능 복구 안전 화면")
+    st.success("22ROUND에서 사라진 것처럼 보였던 전체 대시보드는 삭제된 것이 아니라 안전부팅 화면에 가려져 있었습니다. 이 버전은 전체 기능을 수동 버튼으로 다시 열 수 있게 복구합니다.")
+    st.info("일반 접속은 구글시트 읽기, 26개 API 수집, 전체 대시보드를 자동 실행하지 않습니다. 먼저 화면만 빠르게 뜹니다.")
     st.caption("자동구매/자동결제 없음 · 공식 구매 페이지에서 사용자가 직접 입력/확정")
 
     with st.sidebar:
         st.header("상태")
-        st.write("22ROUND SAFE BOOT")
+        st.write("23ROUND FULL RESTORE SAFE")
         try:
             st.link_button("📗 구글시트 허브", f"https://docs.google.com/spreadsheets/d/{MARU_KRA_FIXED_SHEET_ID}/edit", use_container_width=True)
         except Exception:
             pass
+        st.warning("Apps Script URL이 404면 저장은 실패합니다. 코드 삭제 문제가 아닙니다.")
 
-    tab1, tab2, tab3 = st.tabs(["1. 키/Secrets 진단", "2. 허브 짧은 확인", "3. 다음 조치"])
-    with tab1:
-        st.subheader("Secrets 감지 상태")
-        st.warning("키값 원문은 보이지 않게 마스킹합니다.")
-        if st.button("🔎 Secrets 감지 검사", key="maru22_secret_diag", use_container_width=True):
-            st.json(_maru22_secret_diag())
-        st.caption("KRA_API_KEY / SERVICE_KEY 등이 Y로 떠야 26개 API 실제 호출 단계로 넘어갈 수 있습니다.")
-
-    with tab2:
+    tabs = st.tabs(["1. 복구 확인", "2. 키/URL 진단", "3. 허브 짧은 확인", "4. 전체 대시보드"])
+    with tabs[0]:
+        st.subheader("삭제된 게 아니라 안전부팅 화면으로 바뀐 상태였습니다")
+        st.write("22ROUND는 무한 로딩을 끊기 위해 일부러 화면을 초경량으로 만든 응급판이었습니다. 그래서 기존 분석 화면이 안 보인 겁니다.")
+        st.write("23ROUND는 기존 전체 기능 파일을 바탕으로 다시 만들고, 일반 접속은 가볍게, 전체 기능은 수동으로 여는 방식입니다.")
+        st.code("일반 접속: 화면만 빠르게 표시\n허브 짧은 확인: 4~5초 제한\n전체 대시보드: 사용자가 버튼을 눌렀을 때만 실행", language="text")
+    with tabs[1]:
+        st.subheader("Secrets / Apps Script URL 진단")
+        c1, c2 = st.columns(2)
+        if c1.button("🔎 Secrets 감지 검사", key="maru23_secret_diag", use_container_width=True):
+            st.json(_maru23_secret_diag())
+        if c2.button("🔗 Apps Script URL 형식 검사", key="maru23_url_diag", use_container_width=True):
+            st.json(_maru23_url_diag())
+        st.caption("축약문자포함=Y 또는 http_status=404면 Apps Script 웹앱 URL을 전체 주소로 다시 넣어야 합니다.")
+    with tabs[2]:
         st.subheader("허브 저장/읽기 짧은 확인")
         c1, c2 = st.columns(2)
-        if c1.button("✅ hub_365_status 짧게 저장", key="maru22_quick_save", use_container_width=True):
-            payload = _maru22_status_payload("pc_button", "QUICK_SAVE_TEST")
-            st.json(_maru22_external_save_once("hub_365_status", payload, timeout_sec=4))
-        if c2.button("📥 mobile_recommend 짧게 읽기", key="maru22_quick_load", use_container_width=True):
-            st.json(_maru22_external_load_once("mobile_recommend", timeout_sec=5))
-        st.caption("여기서도 오래 돌면 Apps Script URL/배포/권한 쪽 문제입니다.")
+        if c1.button("✅ hub_365_status 짧게 저장", key="maru23_quick_save", use_container_width=True):
+            st.json(_maru23_quick_save("hub_365_status", timeout_sec=4))
+        if c2.button("📥 mobile_recommend 짧게 읽기", key="maru23_quick_load", use_container_width=True):
+            st.json(_maru23_quick_load("mobile_recommend", timeout_sec=5))
+    with tabs[3]:
+        st.subheader("기존 전체 대시보드 수동 복구")
+        st.warning("이 버튼은 기존 누적 전체 대시보드를 수동으로 엽니다. 무거울 수 있으니 URL 404를 먼저 고친 뒤 여는 게 좋습니다.")
+        if st.button("🧩 기존 전체 대시보드 수동으로 열기", key="maru23_open_legacy_full_dashboard", use_container_width=True):
+            try:
+                if callable(render_legacy_full_dashboard):
+                    render_legacy_full_dashboard()
+                else:
+                    st.error("기존 전체 대시보드 함수가 없습니다. 이 경우 GitHub 이전 커밋에서 app.py 복구가 필요합니다.")
+            except Exception as e:
+                st.error(f"기존 전체 대시보드 실행 중 오류: {str(e)[:500]}")
+                st.info("안전 화면은 유지됩니다. 전체 기능 파일 자체가 삭제된 것은 아닙니다.")
 
-    with tab3:
-        st.subheader("왜 21ROUND가 무한처럼 보였는가")
-        st.write("21ROUND도 문법 검사는 통과했지만, 실제 화면 렌더링에서 허브 읽기/저장 또는 기존 누적 함수가 오래 붙잡을 수 있었습니다.")
-        st.write("22ROUND는 원인을 더 좁히려고 화면 진입 자체를 초경량으로 바꿨습니다.")
-        st.code("1) 화면이 바로 뜨는지 확인\n2) Secrets 감지 검사\n3) 허브 짧은 저장\n4) mobile_recommend 짧은 읽기\n5) 그 다음 26개 API 실수집 복구", language="text")
 
-
-def _maru22_final_entrypoint() -> None:
+def _maru23_final_entrypoint() -> None:
     try:
         is_tick = bool("_hub365_is_background_tick_request" in globals() and _hub365_is_background_tick_request())
     except Exception:
         is_tick = False
     if is_tick:
-        payload = _maru22_status_payload("apps_script_tick", "TICK_RECEIVED_NO_BLOCK")
-        save = _maru22_external_save_once("hub_365_status", payload, timeout_sec=4)
-        st.write({"ok": True, "round": "22ROUND", "mode": "apps_script_tick", "save": save})
+        # Apps Script tick은 길게 붙잡지 않고 짧은 상태 저장만 시도합니다.
+        result = _maru23_quick_save("hub_365_status", timeout_sec=4)
+        try:
+            st.write({"ok": True, "round": "23ROUND", "mode": "apps_script_tick", "save": result})
+        except Exception:
+            pass
         return
-    _maru22_render_lite()
+    _maru23_render_safe_home()
 
 
 if __name__ == "__main__":
-    _maru22_final_entrypoint()
+    _maru23_final_entrypoint()
