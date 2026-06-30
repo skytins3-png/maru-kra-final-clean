@@ -11006,5 +11006,167 @@ def _maru21_final_entrypoint() -> None:
         st.write(_maru21_quick_health_payload("render_exception", "RENDER_EXCEPTION"))
 
 
+
+# =============================================================================
+# 22ROUND_BOOT_LITE_NO_SPIN_FIX
+# 목적:
+# - 재부팅/새로고침 때 무한 로딩을 막기 위해 일반 PC 진입 화면을 초경량으로 분리합니다.
+# - 일반 화면은 구글시트 읽기/26개 API/기존 전체 대시보드를 자동 실행하지 않습니다.
+# - 버튼도 긴 작업을 직접 물고 있지 않고, 짧은 진단/요청 기록만 수행합니다.
+# - 자동구매/자동결제 없음 유지.
+# =============================================================================
+MARU_KRA_FINAL_PRECHECK_ROUND = "22ROUND"
+
+
+def _maru22_mask(value: str) -> str:
+    value = str(value or "")
+    if not value:
+        return ""
+    if len(value) <= 10:
+        return value[:2] + "…" + value[-2:]
+    return value[:4] + "…" + value[-4:]
+
+
+def _maru22_secret_diag() -> dict:
+    names = [
+        "GOOGLE_SCRIPT_URL", "GOOGLE_APPS_SCRIPT_WEBAPP_URL", "GOOGLE_SCRIPT_TOKEN", "MARU_KRA_TOKEN",
+        "KRA_API_KEY", "PUBLIC_DATA_API_KEY", "SERVICE_KEY", "DATA_GO_KR_SERVICE_KEY", "OPENAPI_SERVICE_KEY",
+        "api_key", "serviceKey", "service_key",
+    ]
+    out = {}
+    for name in names:
+        val = ""
+        try:
+            val = str(st.secrets.get(name, "") or "").strip()
+        except Exception:
+            val = ""
+        if not val:
+            try:
+                val = str(os.environ.get(name, "") or "").strip()
+            except Exception:
+                val = ""
+        out[name] = {"감지": "Y" if bool(val) else "N", "미리보기": _maru22_mask(val), "길이": len(val) if val else 0}
+    return out
+
+
+def _maru22_now() -> str:
+    try:
+        return _hub365_now_str() if "_hub365_now_str" in globals() else str(datetime.datetime.now())
+    except Exception:
+        return ""
+
+
+def _maru22_external_save_once(kind: str, payload: dict, timeout_sec: int = 4) -> dict:
+    """긴 저장 대기를 줄이기 위한 1회 짧은 저장. 실패해도 화면은 멈추지 않습니다."""
+    result = {"kind": kind, "external_ok": "N", "error": ""}
+    try:
+        url, token = _external_hub_config() if "_external_hub_config" in globals() else ("", "")
+    except Exception:
+        url, token = "", ""
+    if not str(url).startswith("https://"):
+        result["error"] = "GOOGLE_SCRIPT_URL 없음"
+        return result
+    try:
+        body = {"action": "save", "kind": kind, "token": token, "payload": payload or {}, "saved_at": _maru22_now()}
+        r = requests.post(url, json=body, timeout=timeout_sec)
+        result["http_status"] = getattr(r, "status_code", "")
+        result["external_ok"] = "Y" if getattr(r, "status_code", 0) == 200 else "N"
+    except Exception as e:
+        result["error"] = str(e)[:200]
+    return result
+
+
+def _maru22_external_load_once(kind: str = "mobile_recommend", timeout_sec: int = 5) -> dict:
+    result = {"ok": "N", "kind": kind, "payload": {}, "error": ""}
+    try:
+        url, token = _external_hub_config() if "_external_hub_config" in globals() else ("", "")
+    except Exception:
+        url, token = "", ""
+    if not str(url).startswith("https://"):
+        result["error"] = "GOOGLE_SCRIPT_URL 없음"
+        return result
+    try:
+        r = requests.get(url, params={"action": "load", "kind": kind, "token": token}, timeout=timeout_sec)
+        result["http_status"] = getattr(r, "status_code", "")
+        if getattr(r, "status_code", 0) == 200:
+            data = r.json()
+            payload = data.get("payload", data) if isinstance(data, dict) else {}
+            result["payload"] = payload if isinstance(payload, dict) else {}
+            result["ok"] = "Y"
+    except Exception as e:
+        result["error"] = str(e)[:200]
+    return result
+
+
+def _maru22_status_payload(source: str, status: str) -> dict:
+    return {
+        "저장시각": _maru22_now(),
+        "버전": "22ROUND_BOOT_LITE_NO_SPIN_FIX",
+        "실행출처": source,
+        "상태": status,
+        "설명": "무한 로딩 방지를 위해 일반 화면은 자동 읽기/자동 수집을 하지 않습니다. 버튼은 짧은 진단만 수행합니다.",
+        "SHEET_ID": MARU_KRA_FIXED_SHEET_ID if "MARU_KRA_FIXED_SHEET_ID" in globals() else "",
+        "자동구매": "없음",
+        "자동결제": "없음",
+        "마권구매": "공식 구매 페이지에서 사용자가 직접 입력·확정",
+    }
+
+
+def _maru22_render_lite() -> None:
+    try:
+        st.set_page_config(page_title="MARU KRA 22ROUND SAFE", page_icon="🐎", layout="wide")
+    except Exception:
+        pass
+    st.title("🐎 MARU KRA · 22ROUND 안전 부팅 화면")
+    st.success("앱 화면 먼저 뜨게 만든 무한로딩 방지판입니다.")
+    st.info("일반 접속은 구글시트 읽기, 26개 API 수집, 기존 대시보드를 자동 실행하지 않습니다.")
+    st.caption("자동구매/자동결제 없음 · 공식 구매 페이지에서 사용자가 직접 입력/확정")
+
+    with st.sidebar:
+        st.header("상태")
+        st.write("22ROUND SAFE BOOT")
+        try:
+            st.link_button("📗 구글시트 허브", f"https://docs.google.com/spreadsheets/d/{MARU_KRA_FIXED_SHEET_ID}/edit", use_container_width=True)
+        except Exception:
+            pass
+
+    tab1, tab2, tab3 = st.tabs(["1. 키/Secrets 진단", "2. 허브 짧은 확인", "3. 다음 조치"])
+    with tab1:
+        st.subheader("Secrets 감지 상태")
+        st.warning("키값 원문은 보이지 않게 마스킹합니다.")
+        if st.button("🔎 Secrets 감지 검사", key="maru22_secret_diag", use_container_width=True):
+            st.json(_maru22_secret_diag())
+        st.caption("KRA_API_KEY / SERVICE_KEY 등이 Y로 떠야 26개 API 실제 호출 단계로 넘어갈 수 있습니다.")
+
+    with tab2:
+        st.subheader("허브 저장/읽기 짧은 확인")
+        c1, c2 = st.columns(2)
+        if c1.button("✅ hub_365_status 짧게 저장", key="maru22_quick_save", use_container_width=True):
+            payload = _maru22_status_payload("pc_button", "QUICK_SAVE_TEST")
+            st.json(_maru22_external_save_once("hub_365_status", payload, timeout_sec=4))
+        if c2.button("📥 mobile_recommend 짧게 읽기", key="maru22_quick_load", use_container_width=True):
+            st.json(_maru22_external_load_once("mobile_recommend", timeout_sec=5))
+        st.caption("여기서도 오래 돌면 Apps Script URL/배포/권한 쪽 문제입니다.")
+
+    with tab3:
+        st.subheader("왜 21ROUND가 무한처럼 보였는가")
+        st.write("21ROUND도 문법 검사는 통과했지만, 실제 화면 렌더링에서 허브 읽기/저장 또는 기존 누적 함수가 오래 붙잡을 수 있었습니다.")
+        st.write("22ROUND는 원인을 더 좁히려고 화면 진입 자체를 초경량으로 바꿨습니다.")
+        st.code("1) 화면이 바로 뜨는지 확인\n2) Secrets 감지 검사\n3) 허브 짧은 저장\n4) mobile_recommend 짧은 읽기\n5) 그 다음 26개 API 실수집 복구", language="text")
+
+
+def _maru22_final_entrypoint() -> None:
+    try:
+        is_tick = bool("_hub365_is_background_tick_request" in globals() and _hub365_is_background_tick_request())
+    except Exception:
+        is_tick = False
+    if is_tick:
+        payload = _maru22_status_payload("apps_script_tick", "TICK_RECEIVED_NO_BLOCK")
+        save = _maru22_external_save_once("hub_365_status", payload, timeout_sec=4)
+        st.write({"ok": True, "round": "22ROUND", "mode": "apps_script_tick", "save": save})
+        return
+    _maru22_render_lite()
+
+
 if __name__ == "__main__":
-    _maru21_final_entrypoint()
+    _maru22_final_entrypoint()
