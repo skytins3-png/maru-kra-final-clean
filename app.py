@@ -2930,11 +2930,11 @@ def _sanitize_mobile_loaded_row(row: Dict[str, Any]) -> Dict[str, Any]:
             if last_no:
                 row["경주번호"] = int(last_no)
             row["데이터상태"] = "경주종료"
-            row["상태"] = "오늘 경주 종료 · 서울 1경주 잔여 추천 표시 차단"
+            row["상태"] = f"오늘 경주 종료 · 이전 추천 표시 차단"
             row["실전표시불가"] = "Y"
             row["실전검증"] = "N"
             row["삼쌍승18조합"] = ""
-            row["구매표복사"] = "[경주 종료]\n오늘 경주는 종료되었습니다.\n모바일에 남아 있던 서울 1경주 추천은 표시하지 않습니다.\nPC에서 새 경주 분석 후 다시 저장하세요."
+            row["구매표복사"] = "[경주 종료]\n오늘 경주는 종료되었습니다.\n이전 경주 추천은 모바일에 표시하지 않습니다.\nPC 또는 Apps Script 백그라운드에서 새 경주 분석 후 다시 저장됩니다."
             return row
     except Exception:
         pass
@@ -3613,7 +3613,7 @@ def _run_five_agents(row: Dict[str, Any]) -> Dict[str, Any]:
         race_no = int(float(row.get("경주번호", 1) or 1))
         if "_auto_collect_window_by_schedule" in globals():
             ok, reason, target_no = _auto_collect_window_by_schedule(rc_date, meet, race_no)
-            # 14ROUND_AGENT_TARGET_LOCK: 시간표 감시는 참고만 하고, 이미 수집/분석 중인 경주번호는 바꾸지 않음
+            # 15ROUND_AGENT_TARGET_LOCK: 시간표 감시는 참고만 하고, 이미 수집/분석 중인 경주번호는 바꾸지 않음
             if target_no and int(target_no) != int(race_no):
                 report["달"] = f"{reason} · 현재 추천대상 {race_no}R 유지"
             else:
@@ -5888,7 +5888,7 @@ def _validate_selected_race_horses(score_df: pd.DataFrame, meet: str, race_no: i
 
 # END_OF_DAY_HARD_STOP_FINAL
 def _end_of_day_kst_stop(rc_date: str = "", meet: str = "서울") -> Tuple[bool, Optional[int], str]:
-    """오늘 경주 종료 후 기본값 서울 1경주 실시간 수집 루프를 강제로 막습니다."""
+    """오늘 경주 종료 후 기본 경주 실시간 수집 루프를 강제로 막습니다."""
     try:
         now = now_kst()
     except Exception:
@@ -6719,7 +6719,7 @@ def render_live_panel(rc_date: str, meet: str, race_no: int, selected: List[str]
         if last_race_no:
             race_no = int(last_race_no)
             current_race_key = f"{rc_date}|{meet}|{int(race_no)}"
-        st.warning(f"오늘 {meet} 경주는 종료되었습니다. 서울 1경주 실시간 수집을 중단하고 저장/캐시 결과만 표시합니다.")
+        st.warning(f"오늘 {meet} 경주는 종료되었습니다. {int(race_no)}경주 실시간 수집을 중단하고 저장/캐시 결과만 표시합니다.")
         cache_data = st.session_state.get("live_data", {}) or load_live_cache()
         cache_data = _filter_data_selected_race(cache_data, rc_date, meet, int(race_no)) if "_filter_data_selected_race" in globals() else cache_data
         st.session_state["live_data"] = cache_data if cache_data else {}
@@ -7719,7 +7719,7 @@ def build_recommendation_after_each_race(rc_date: str, meet: str, race_no: Any, 
         try:
             if "_build_three_type_recommendation" in globals():
                 result = _build_three_type_recommendation(result)
-            # 14ROUND_TARGET_LOCK: 추천 보조함수가 값을 보정해도 실제 수집 대상 날짜/경마장/경주번호는 유지
+            # 15ROUND_TARGET_LOCK: 추천 보조함수가 값을 보정해도 실제 수집 대상 날짜/경마장/경주번호는 유지
             try:
                 result.update({
                     "날짜": rc_date,
@@ -8192,7 +8192,7 @@ def build_recommendation_after_each_race(rc_date: str, meet: str, race_no: Any, 
         try:
             if "_build_three_type_recommendation" in globals():
                 result = _build_three_type_recommendation(result)
-            # 14ROUND_TARGET_LOCK: 추천 보조함수가 값을 보정해도 실제 수집 대상 날짜/경마장/경주번호는 유지
+            # 15ROUND_TARGET_LOCK: 추천 보조함수가 값을 보정해도 실제 수집 대상 날짜/경마장/경주번호는 유지
             try:
                 result.update({
                     "날짜": rc_date,
@@ -10271,14 +10271,14 @@ def render() -> None:
         pass
     st.markdown("""
 <div class="hero">
-<h2>MARU KRA HUB365 안전 대시보드 · 14ROUND</h2>
+<h2>MARU KRA HUB365 안전 대시보드 · 17ROUND</h2>
 <div class="muted">PC는 확인용 · 일반 접속 자동수집 없음 · Apps Script agent_tick=1 때만 백그라운드 실행 · 모바일은 허브 추천결과만 표시</div>
 </div>
 """, unsafe_allow_html=True)
     st.caption("자동구매/자동결제 없음. 공식 구매 페이지 이동 후 사용자가 직접 입력·확정합니다.")
     with st.sidebar:
         st.title("🐎 MARU KRA")
-        st.success("14ROUND 26API 순차수집 모의검증 안전 진입점")
+        st.success("17ROUND 반복 심층검사 안전 진입점")
         st.info("일반 PC 접속은 자동수집을 실행하지 않습니다.")
         try:
             st.link_button("📱 모바일 추천결과", CLOUD_MOBILE_URL, width="stretch")
@@ -10316,6 +10316,151 @@ def render() -> None:
                 render_legacy_full_dashboard()
             else:
                 st.error("기존 대시보드 함수를 찾지 못했습니다.")
+
+
+
+# 16ROUND_AGENT_ACTIVITY_VISIBILITY_AND_STALE_TEXT_FIX
+# 목적:
+# - 허브 365 버튼/Apps Script tick을 눌렀는데 에이전트가 활동하지 않는 것처럼 보이는 문제를 보정합니다.
+# - 실제 실행 때마다 hub_365_status / agent_365_runs에 5명 에이전트 활동 기록을 명시적으로 남깁니다.
+# - 경주 종료 후 모바일에 남은 특정 경주 문구를 일반화하여 오래된 추천 오해를 막습니다.
+try:
+    _run_hub365_cycle_core_15round = run_hub365_cycle
+except Exception:
+    _run_hub365_cycle_core_15round = None
+
+def _hub365_agent_activity_row_15round(source: str = "manual", latest: dict = None, result: dict = None) -> dict:
+    latest = dict(latest or {})
+    result = dict(result or {})
+    try:
+        phase = _hub365_phase(latest) if "_hub365_phase" in globals() else {}
+    except Exception:
+        phase = {}
+    try:
+        prob = _hub365_probability_from_hub(latest) if "_hub365_probability_from_hub" in globals() else {}
+    except Exception:
+        prob = {}
+    return {
+        "저장시각": _hub365_now_str() if "_hub365_now_str" in globals() else (now_str() if "now_str" in globals() else str(datetime.datetime.now())),
+        "상태": "해·달·별·구름·비 5명 에이전트 활동 기록",
+        "source": str(source),
+        "현재모드": phase.get("코드", "UNKNOWN"),
+        "모드설명": phase.get("제목", "허브 365 실행"),
+        "경마장": latest.get("경마장", ""),
+        "경주번호": latest.get("경주번호", ""),
+        "해": "총괄 판단/확률/전략 점검",
+        "달": "경주 있는 날·없는 날·경주 종료 상태 판단",
+        "별": "26개 API/허브 자료 수집 가능 상태 점검",
+        "구름": "체중·게이트·주로·날씨·배당변수 감시",
+        "비": "성공/실패 원인·learning_bigdata 복기",
+        "AI종합확률": prob.get("AI종합확률", latest.get("AI종합확률", "")),
+        "자료충분도": prob.get("자료충분도", latest.get("자료충분도", "")),
+        "자동구매": "없음",
+        "자동결제": "없음",
+        "실행결과": result,
+    }
+
+def _hub365_make_end_or_learning_mobile_row_15round(latest: dict = None, source: str = "manual") -> dict:
+    latest = dict(latest or {})
+    meet = latest.get("경마장") or "서울"
+    race_no = latest.get("경주번호") or latest.get("race_no") or ""
+    try:
+        phase = _hub365_phase(latest) if "_hub365_phase" in globals() else {}
+    except Exception:
+        phase = {}
+    try:
+        prob = _hub365_probability_from_hub(latest) if "_hub365_probability_from_hub" in globals() else {}
+    except Exception:
+        prob = {}
+    status_title = "오늘 경주 종료 · 이전 추천 표시 차단"
+    if phase.get("코드") == "NO_RACE_DAY":
+        status_title = "오늘 경주 없음 · 5명 에이전트 학습/복기 활동중"
+    row = dict(latest)
+    row.update({
+        "저장시각": _hub365_now_str() if "_hub365_now_str" in globals() else (now_str() if "now_str" in globals() else str(datetime.datetime.now())),
+        "상태": status_title,
+        "설명": "해·달·별·구름·비 에이전트가 허브 상태/학습/복기 기록을 저장했습니다. 새 경주 분석 후 추천이 갱신됩니다.",
+        "자동구매": "없음",
+        "자동결제": "없음",
+        "경마장": meet,
+        "경주번호": race_no,
+        "데이터상태": "경주종료/학습중" if phase.get("코드") != "NO_RACE_DAY" else "경주없음/학습중",
+        "실전표시불가": "Y",
+        "실전검증": "N",
+        "365AI상태": "해·달·별·구름·비 5명 에이전트 활동 기록 저장",
+        "삼쌍승18조합": "",
+        "구매표복사": "[경주 종료/학습 상태]\n현재 실전 추천 표시는 차단되었습니다.\n이전 경주 추천은 모바일에 표시하지 않습니다.\nPC 수동 실행 또는 Apps Script 백그라운드 실행 후 새 경주 추천이 저장되면 갱신됩니다.",
+        "source": str(source),
+    })
+    row.update(prob)
+    return row
+
+def run_hub365_cycle(source: str = "manual") -> dict:
+    prev_flag = False
+    try:
+        prev_flag = bool(st.session_state.get("_hub365_network_allowed", False))
+    except Exception:
+        prev_flag = False
+    try:
+        st.session_state["_hub365_network_allowed"] = True
+    except Exception:
+        pass
+    latest = {}
+    try:
+        latest = load_mobile_recommend_json() if "load_mobile_recommend_json" in globals() else {}
+    except Exception:
+        latest = {}
+    try:
+        start_row = _hub365_agent_activity_row_15round(source, latest, {"단계": "start"})
+        if "_hub365_safe_save" in globals():
+            _hub365_safe_save("agent_365_runs", start_row)
+            _hub365_safe_save("hub_365_status", start_row)
+    except Exception:
+        pass
+    result = {"ok": False, "오류": "run_hub365_cycle core not found"}
+    try:
+        if callable(_run_hub365_cycle_core_15round):
+            result = _run_hub365_cycle_core_15round(source)
+        else:
+            result = {"ok": True, "상태": "core 없음 · 활동기록만 저장"}
+        try:
+            latest2 = load_mobile_recommend_json() if "load_mobile_recommend_json" in globals() else latest
+        except Exception:
+            latest2 = latest
+        done_row = _hub365_agent_activity_row_15round(source, latest2, {"단계": "done", "result": result})
+        if "_hub365_safe_save" in globals():
+            _hub365_safe_save("agent_365_runs", done_row)
+            _hub365_safe_save("hub_365_status", done_row)
+        # 경주 종료/경주 없음/실전표시불가 상태에서는 모바일에 '추천 없음/학습중'을 명시적으로 저장합니다.
+        try:
+            phase = _hub365_phase(latest2) if "_hub365_phase" in globals() else {}
+            ended = str(latest2.get("데이터상태", "")) in ["경주종료", "종료", "경주종료/학습중"] or str(latest2.get("실전표시불가", "")) == "Y"
+            if phase.get("코드") in ["NO_RACE_DAY", "RACE_REVIEW"] or ended:
+                mobile_row = _hub365_make_end_or_learning_mobile_row_15round(latest2, source)
+                if "save_mobile_recommend_json" in globals():
+                    save_mobile_recommend_json(mobile_row)
+                elif "_hub365_safe_save" in globals():
+                    _hub365_safe_save("mobile_recommend", mobile_row)
+        except Exception:
+            pass
+        if isinstance(result, dict):
+            result["에이전트활동저장"] = "Y"
+            result["저장탭"] = "hub_365_status / agent_365_runs / mobile_recommend(종료·학습상태일 때)"
+        return result
+    except Exception as e:
+        err = {"ok": False, "상태": "허브365 실행 중 오류", "오류": str(e)[:300], "에이전트활동저장": "오류기록 시도"}
+        try:
+            if "_hub365_safe_save" in globals():
+                _hub365_safe_save("agent_365_runs", _hub365_agent_activity_row_15round(source, latest, err))
+                _hub365_safe_save("hub_365_status", _hub365_agent_activity_row_15round(source, latest, err))
+        except Exception:
+            pass
+        return err
+    finally:
+        try:
+            st.session_state["_hub365_network_allowed"] = bool(prev_flag)
+        except Exception:
+            pass
 
 if __name__ == "__main__":
     if "_hub365_is_background_tick_request" in globals() and _hub365_is_background_tick_request():
