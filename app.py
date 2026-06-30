@@ -9798,7 +9798,7 @@ def _render_mobile_compact_3type_view(row: Dict[str, Any]) -> None:
 # =============================================================================
 MARU_KRA_FIXED_SHEET_ID = "1uT8lQfbpjhblvFOsFdBSmAnGHXzqhlZQ5jsBayLTpwo"
 MARU_KRA_FIXED_GID = "909440003"
-MARU_KRA_FINAL_PRECHECK_ROUND = "18ROUND"
+MARU_KRA_FINAL_PRECHECK_ROUND = "19ROUND"
 MARU_KRA_HUB365_VERSION = "cloud_hub_365_final_v1"
 MARU_KRA_HUB_KINDS_FINAL = [
     "mobile_recommend",
@@ -10197,6 +10197,19 @@ def run_hub365_cycle(source: str = "manual") -> dict:
         except Exception:
             pass
 
+
+
+# 19ROUND_DUPKEY_FIX: 같은 허브센터가 안전 대시보드/기존 대시보드 양쪽에서 동시에 렌더링될 때
+# StreamlitDuplicateElementKey가 나지 않도록 호출 경로 기반 고유 key를 만든다.
+def _maru_hub365_unique_widget_key(base: str) -> str:
+    try:
+        frames = inspect.stack(context=0)
+        sig = "|".join(f"{fr.function}:{fr.lineno}" for fr in frames[1:6])
+        safe = re.sub(r"[^0-9A-Za-z_]+", "_", sig)[-120:]
+        return f"{base}_{safe}"
+    except Exception:
+        return f"{base}_{int(time.time() * 1000)}"
+
 def render_hub365_final_center(compact: bool = False) -> None:
     try:
         latest = load_mobile_recommend_json() if "load_mobile_recommend_json" in globals() else {}
@@ -10230,7 +10243,7 @@ def render_hub365_final_center(compact: bool = False) -> None:
     st.info(f"{phase.get('제목','')} · {phase.get('작업','')}")
     st.caption(f"Google Sheet ID 고정 포함: {MARU_KRA_FIXED_SHEET_ID} / gid {MARU_KRA_FIXED_GID} · 입력창 없음")
     c1, c2, c3 = st.columns(3)
-    if c1.button("🔁 허브 365 1회 실행", use_container_width=True, key="hub365_cycle_manual"):
+    if c1.button("🔁 허브 365 1회 실행", use_container_width=True, key=_maru_hub365_unique_widget_key("hub365_cycle_manual")):
         run_hub365_cycle("pc_button")
         st.success("허브 365 실행 완료 · 상태/확률/성공실패 원인을 허브에 저장했습니다.")
         st.rerun()
@@ -10271,14 +10284,14 @@ def render() -> None:
         pass
     st.markdown("""
 <div class="hero">
-<h2>MARU KRA HUB365 안전 대시보드 · 18ROUND</h2>
+<h2>MARU KRA HUB365 안전 대시보드 · 19ROUND</h2>
 <div class="muted">PC는 확인용 · 일반 접속 자동수집 없음 · Apps Script agent_tick=1 때만 백그라운드 실행 · 모바일은 허브 추천결과만 표시</div>
 </div>
 """, unsafe_allow_html=True)
     st.caption("자동구매/자동결제 없음. 공식 구매 페이지 이동 후 사용자가 직접 입력·확정합니다.")
     with st.sidebar:
         st.title("🐎 MARU KRA")
-        st.success("18ROUND 실제수집상태 보강 안전 진입점")
+        st.success("19ROUND 실제수집상태 보강 안전 진입점")
         st.info("일반 PC 접속은 자동수집을 실행하지 않습니다.")
         try:
             st.link_button("📱 모바일 추천결과", CLOUD_MOBILE_URL, width="stretch")
@@ -10464,21 +10477,21 @@ def run_hub365_cycle(source: str = "manual") -> dict:
 
 
 # =============================================================================
-# 18ROUND_API_STATUS_AND_HUB_COUNT_FIX
+# 19ROUND_API_STATUS_AND_HUB_COUNT_FIX
 # 목적:
 # - 허브365 버튼을 눌렀을 때 "에이전트 활동 기록"만 남고 실제 API/허브 자료 상태가 0으로 보이는 문제를 보강합니다.
 # - 26개 API 순차수집 상태를 api_status에 명확히 저장합니다.
 # - 자료가 부족하면 실전 추천을 표시하지 않고 "자료부족/복기중"으로 차단합니다.
 # - hub_365_status에는 실제 수집요약/자료충분도/5명 에이전트 활동을 함께 기록합니다.
 # =============================================================================
-MARU_KRA_FINAL_PRECHECK_ROUND = "18ROUND"
+MARU_KRA_FINAL_PRECHECK_ROUND = "19ROUND"
 try:
     _run_hub365_cycle_core_17round = run_hub365_cycle
 except Exception:
     _run_hub365_cycle_core_17round = None
 
 
-def _hub365_api_state_18round(row: dict, phase_code: str = "") -> str:
+def _hub365_api_state_19round(row: dict, phase_code: str = "") -> str:
     """26개 API별 상태를 OK/EMPTY_NORMAL/PENDING/ERROR_RETRY/BLOCKED/CACHE_USED로 정리합니다."""
     row = dict(row or {})
     key = str(row.get("key", "") or "")
@@ -10512,21 +10525,21 @@ def _hub365_api_state_18round(row: dict, phase_code: str = "") -> str:
     return "ERROR_RETRY"
 
 
-def _hub365_status_records_18round(status_df, phase_code: str = "") -> list:
+def _hub365_status_records_19round(status_df, phase_code: str = "") -> list:
     records = []
     try:
         if status_df is None or not hasattr(status_df, "iterrows") or status_df.empty:
             return records
         for _, r in status_df.iterrows():
             d = {str(k): ("" if v is None else v) for k, v in dict(r).items()}
-            d["표준상태"] = _hub365_api_state_18round(d, phase_code)
+            d["표준상태"] = _hub365_api_state_19round(d, phase_code)
             records.append(d)
     except Exception:
         return []
     return records
 
 
-def _hub365_api_summary_18round(records: list) -> dict:
+def _hub365_api_summary_19round(records: list) -> dict:
     records = list(records or [])
     counts = {"OK": 0, "EMPTY_NORMAL": 0, "PENDING": 0, "ERROR_RETRY": 0, "BLOCKED": 0, "CACHE_USED": 0}
     total_rows = 0
@@ -10559,7 +10572,7 @@ def _hub365_api_summary_18round(records: list) -> dict:
     }
 
 
-def _hub365_local_count_18round(kind: str) -> int:
+def _hub365_local_count_19round(kind: str) -> int:
     """외부 허브가 최신 1건만 반환해도 화면에는 저장 흔적이 0으로 보이지 않게 로컬/세션까지 합산합니다."""
     n = 0
     try:
@@ -10594,7 +10607,7 @@ def _hub365_local_count_18round(kind: str) -> int:
     return int(n)
 
 
-def _hub365_counts_18round() -> dict:
+def _hub365_counts_19round() -> dict:
     out = {}
     try:
         kinds = list(MARU_KRA_HUB_KINDS_FINAL)
@@ -10602,13 +10615,13 @@ def _hub365_counts_18round() -> dict:
         kinds = ["mobile_recommend", "api_status", "live_api_data", "learning_bigdata", "hub_365_status", "agent_365_runs"]
     for k in kinds:
         try:
-            out[k] = max(int(_hub365_count(k) if "_hub365_count" in globals() else 0), _hub365_local_count_18round(k))
+            out[k] = max(int(_hub365_count(k) if "_hub365_count" in globals() else 0), _hub365_local_count_19round(k))
         except Exception:
-            out[k] = _hub365_local_count_18round(k)
+            out[k] = _hub365_local_count_19round(k)
     return out
 
 
-def _hub365_make_material_shortage_mobile_18round(latest: dict, phase: dict, api_summary: dict, source: str) -> dict:
+def _hub365_make_material_shortage_mobile_19round(latest: dict, phase: dict, api_summary: dict, source: str) -> dict:
     latest = dict(latest or {})
     row = dict(latest)
     row.update({
@@ -10632,7 +10645,7 @@ def _hub365_make_material_shortage_mobile_18round(latest: dict, phase: dict, api
     return row
 
 
-def _hub365_try_actual_26api_collection_18round(latest: dict, phase: dict, source: str) -> dict:
+def _hub365_try_actual_26api_collection_19round(latest: dict, phase: dict, source: str) -> dict:
     """수동/Apps Script 실행 때만 26개 API 순차수집을 시도하고 상태를 허브에 저장합니다."""
     latest = dict(latest or {})
     phase = dict(phase or {})
@@ -10647,8 +10660,8 @@ def _hub365_try_actual_26api_collection_18round(latest: dict, phase: dict, sourc
         return out
     try:
         data, status_df, rec = stable_fetch_batch_and_analyze(rc_date, meet, race_no, max_count=26, retry=1)
-        records = _hub365_status_records_18round(status_df, phase.get("코드", ""))
-        api_summary = _hub365_api_summary_18round(records)
+        records = _hub365_status_records_19round(status_df, phase.get("코드", ""))
+        api_summary = _hub365_api_summary_19round(records)
         out.update({"실행": "Y", "사유": "26개 API 순차수집 시도 완료", "api_summary": api_summary, "records": records})
         try:
             _hub365_safe_save("api_status", {"저장시각": _hub365_now_str(), "분류": "26API_SEQUENTIAL_STATUS", "source": source, "날짜": rc_date, "경마장": meet, "경주번호": race_no, "요약": api_summary, "API목록": records})
@@ -10683,7 +10696,7 @@ def _hub365_try_actual_26api_collection_18round(latest: dict, phase: dict, sourc
                     _hub365_safe_save("mobile_recommend", rec)
                 _hub365_safe_save("three_type_recommend", rec)
             else:
-                shortage = _hub365_make_material_shortage_mobile_18round(rec, phase, api_summary, source)
+                shortage = _hub365_make_material_shortage_mobile_19round(rec, phase, api_summary, source)
                 try:
                     save_mobile_recommend_json(shortage)
                 except Exception:
@@ -10700,7 +10713,7 @@ def _hub365_try_actual_26api_collection_18round(latest: dict, phase: dict, sourc
 
 
 def run_hub365_cycle(source: str = "manual") -> dict:
-    """18ROUND: 에이전트 활동 + 실제 26개 API 상태 + 정확한 허브자료현황을 함께 반환/저장합니다."""
+    """19ROUND: 에이전트 활동 + 실제 26개 API 상태 + 정확한 허브자료현황을 함께 반환/저장합니다."""
     prev_flag = False
     try:
         prev_flag = bool(st.session_state.get("_hub365_network_allowed", False))
@@ -10723,8 +10736,8 @@ def run_hub365_cycle(source: str = "manual") -> dict:
     except Exception:
         latest_after_core = latest
     phase_after = _hub365_phase(latest_after_core) if "_hub365_phase" in globals() else phase
-    collect_result = _hub365_try_actual_26api_collection_18round(latest_after_core, phase_after, source)
-    counts = _hub365_counts_18round()
+    collect_result = _hub365_try_actual_26api_collection_19round(latest_after_core, phase_after, source)
+    counts = _hub365_counts_19round()
     api_summary = dict(collect_result.get("api_summary") or {})
     status = {
         "저장시각": _hub365_now_str() if "_hub365_now_str" in globals() else str(datetime.datetime.now()),
