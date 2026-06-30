@@ -10779,18 +10779,10 @@ def run_hub365_cycle(source: str = "manual") -> dict:
             pass
     return status
 
-if __name__ == "__main__":
-    if "_hub365_is_background_tick_request" in globals() and _hub365_is_background_tick_request():
-        try:
-            result = run_hub365_cycle("apps_script_tick")
-            st.write({"ok": True, "mode": "apps_script_tick", "result": result})
-        except Exception as e:
-            try:
-                st.write({"ok": False, "mode": "apps_script_tick", "error": str(e)[:300]})
-            except Exception:
-                pass
-    else:
-        render()
+# 21ROUND: 이전 버전은 여기서 render()를 먼저 실행해 뒤쪽 20ROUND 패치가 적용되기 전에 화면을 만들었습니다.
+# 이 조기 진입점을 비활성화하고, 파일 맨 아래에서 모든 패치 정의 후 최종 진입합니다.
+def _maru_legacy_early_entrypoint_disabled_21round():
+    return None
 
 # =============================================================================
 # 20ROUND_HUB_SAVE_VISIBILITY_DIAGNOSTIC_FIX
@@ -10912,3 +10904,107 @@ try:
 except Exception:
     _hub365_button_key_suffix_20round = "20r"
 
+
+
+# =============================================================================
+# 21ROUND_BOOT_SPIN_ENTRYPOINT_FIX
+# 목적:
+# - 재부팅/새로고침 때 무한 로딩처럼 보이는 원인을 줄입니다.
+# - 20ROUND 패치가 정의되기 전에 render()가 먼저 실행되던 조기 진입점을 제거했습니다.
+# - 최종 진입점은 파일 맨 아래 1곳으로 고정합니다.
+# - PC 일반 접속은 화면 확인만 수행하고, agent_tick=1 또는 버튼 클릭 때만 허브 작업을 실행합니다.
+# =============================================================================
+MARU_KRA_FINAL_PRECHECK_ROUND = "21ROUND"
+
+try:
+    _run_hub365_cycle_core_20round = run_hub365_cycle
+except Exception:
+    _run_hub365_cycle_core_20round = None
+
+
+def _maru21_now() -> str:
+    try:
+        return _hub365_now_str() if "_hub365_now_str" in globals() else str(datetime.datetime.now())
+    except Exception:
+        return ""
+
+
+def _maru21_quick_health_payload(source: str, status: str = "BOOT_OK") -> dict:
+    payload = {
+        "저장시각": _maru21_now(),
+        "버전": "21ROUND_BOOT_SPIN_ENTRYPOINT_FIX",
+        "실행출처": source,
+        "상태": status,
+        "설명": "조기 render() 제거 · 재부팅 무한로딩 방지 · PC 일반 접속 자동수집 없음",
+        "자동구매": "없음",
+        "자동결제": "없음",
+    }
+    try:
+        payload["SHEET_ID"] = MARU_KRA_FIXED_SHEET_ID if "MARU_KRA_FIXED_SHEET_ID" in globals() else ""
+    except Exception:
+        pass
+    try:
+        payload["외부허브설정"] = _hub365_external_config_visible_20round() if "_hub365_external_config_visible_20round" in globals() else {}
+    except Exception:
+        payload["외부허브설정"] = {}
+    return payload
+
+
+def _maru21_safe_write(kind: str, payload: dict) -> dict:
+    """저장 통로 자체가 화면 로딩을 붙잡지 않도록 최대한 짧게 시도합니다."""
+    try:
+        if "_hub365_force_visible_save_20round" in globals():
+            return _hub365_force_visible_save_20round(kind, payload)
+    except Exception as e:
+        return {"kind": kind, "external_ok": "N", "local_ok": "N", "error": str(e)[:200]}
+    return {"kind": kind, "external_ok": "N", "local_ok": "N", "error": "save helper 없음"}
+
+
+def run_hub365_cycle(source: str = "manual") -> dict:
+    """21ROUND: 수동/트리거 실행은 20ROUND 코어를 사용하되, 실패 시 반드시 짧게 복구 응답을 반환합니다."""
+    source = str(source or "manual")
+    started = _maru21_now()
+    try:
+        _maru21_safe_write("hub_365_status", _maru21_quick_health_payload(source, "RUNNING_START"))
+    except Exception:
+        pass
+    try:
+        if callable(_run_hub365_cycle_core_20round):
+            out = _run_hub365_cycle_core_20round(source)
+        else:
+            out = {"ok": False, "오류": "20ROUND core 없음"}
+    except Exception as e:
+        out = {"ok": False, "오류": str(e)[:500], "자동구매": "없음", "자동결제": "없음"}
+    try:
+        done = _maru21_quick_health_payload(source, "DONE_OR_RETURNED")
+        done["시작시각"] = started
+        done["실행결과요약"] = out if isinstance(out, dict) else {"result": str(out)[:500]}
+        _maru21_safe_write("hub_365_status", done)
+    except Exception:
+        pass
+    return out if isinstance(out, dict) else {"result": str(out)[:500]}
+
+
+def _maru21_final_entrypoint() -> None:
+    """모든 패치가 정의된 뒤에 딱 한 번만 앱을 시작합니다."""
+    try:
+        is_tick = bool("_hub365_is_background_tick_request" in globals() and _hub365_is_background_tick_request())
+    except Exception:
+        is_tick = False
+    if is_tick:
+        try:
+            result = run_hub365_cycle("apps_script_tick")
+            st.write({"ok": True, "mode": "apps_script_tick", "round": "21ROUND", "result": result})
+        except Exception as e:
+            st.write({"ok": False, "mode": "apps_script_tick", "round": "21ROUND", "error": str(e)[:500]})
+        return
+    try:
+        render()
+    except Exception as e:
+        st.error("앱 화면 렌더링 중 오류가 발생했습니다. 재부팅 무한로딩 방지 화면입니다.")
+        st.code(str(e)[:1000])
+        st.write(_maru21_quick_health_payload("render_exception", "RENDER_EXCEPTION"))
+
+
+if __name__ == "__main__":
+    _maru21_final_entrypoint()
