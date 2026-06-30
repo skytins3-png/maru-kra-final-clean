@@ -9798,7 +9798,7 @@ def _render_mobile_compact_3type_view(row: Dict[str, Any]) -> None:
 # =============================================================================
 MARU_KRA_FIXED_SHEET_ID = "1uT8lQfbpjhblvFOsFdBSmAnGHXzqhlZQ5jsBayLTpwo"
 MARU_KRA_FIXED_GID = "909440003"
-MARU_KRA_FINAL_PRECHECK_ROUND = "13ROUND"
+MARU_KRA_FINAL_PRECHECK_ROUND = "18ROUND"
 MARU_KRA_HUB365_VERSION = "cloud_hub_365_final_v1"
 MARU_KRA_HUB_KINDS_FINAL = [
     "mobile_recommend",
@@ -10271,14 +10271,14 @@ def render() -> None:
         pass
     st.markdown("""
 <div class="hero">
-<h2>MARU KRA HUB365 안전 대시보드 · 17ROUND</h2>
+<h2>MARU KRA HUB365 안전 대시보드 · 18ROUND</h2>
 <div class="muted">PC는 확인용 · 일반 접속 자동수집 없음 · Apps Script agent_tick=1 때만 백그라운드 실행 · 모바일은 허브 추천결과만 표시</div>
 </div>
 """, unsafe_allow_html=True)
     st.caption("자동구매/자동결제 없음. 공식 구매 페이지 이동 후 사용자가 직접 입력·확정합니다.")
     with st.sidebar:
         st.title("🐎 MARU KRA")
-        st.success("17ROUND 반복 심층검사 안전 진입점")
+        st.success("18ROUND 실제수집상태 보강 안전 진입점")
         st.info("일반 PC 접속은 자동수집을 실행하지 않습니다.")
         try:
             st.link_button("📱 모바일 추천결과", CLOUD_MOBILE_URL, width="stretch")
@@ -10461,6 +10461,310 @@ def run_hub365_cycle(source: str = "manual") -> dict:
             st.session_state["_hub365_network_allowed"] = bool(prev_flag)
         except Exception:
             pass
+
+
+# =============================================================================
+# 18ROUND_API_STATUS_AND_HUB_COUNT_FIX
+# 목적:
+# - 허브365 버튼을 눌렀을 때 "에이전트 활동 기록"만 남고 실제 API/허브 자료 상태가 0으로 보이는 문제를 보강합니다.
+# - 26개 API 순차수집 상태를 api_status에 명확히 저장합니다.
+# - 자료가 부족하면 실전 추천을 표시하지 않고 "자료부족/복기중"으로 차단합니다.
+# - hub_365_status에는 실제 수집요약/자료충분도/5명 에이전트 활동을 함께 기록합니다.
+# =============================================================================
+MARU_KRA_FINAL_PRECHECK_ROUND = "18ROUND"
+try:
+    _run_hub365_cycle_core_17round = run_hub365_cycle
+except Exception:
+    _run_hub365_cycle_core_17round = None
+
+
+def _hub365_api_state_18round(row: dict, phase_code: str = "") -> str:
+    """26개 API별 상태를 OK/EMPTY_NORMAL/PENDING/ERROR_RETRY/BLOCKED/CACHE_USED로 정리합니다."""
+    row = dict(row or {})
+    key = str(row.get("key", "") or "")
+    msg = " ".join(str(row.get(k, "") or "") for k in ["오류분류", "상태", "message", "msg"])
+    rows = 0
+    try:
+        rows = int(float(str(row.get("행수", 0) or 0).replace(",", "")))
+    except Exception:
+        rows = 0
+    low = msg.lower()
+    if rows > 0 or "ok" in low or "수신" in msg:
+        return "OK"
+    if "auth" in low or "401" in low or "403" in low or "권한" in msg or "servicekey" in low or "키" in msg:
+        return "BLOCKED"
+    if "cache" in low or "캐시" in msg:
+        return "CACHE_USED"
+    if "timeout" in low or "500" in low or "connection" in low or "exception" in low or "error" in low:
+        return "ERROR_RETRY"
+    # 경주 전/후 시간대에 따라 0건이 정상인 API를 분리합니다.
+    event_empty_keys = {"jockey_change_url", "race_cancel_url", "weather_alert_url", "gear_url", "horse_shoe_url"}
+    before_live_keys = {"body_url", "popularity_url", "odds_url", "today_odds_url"}
+    after_result_keys = {"result_detail_url", "race_detail_result_url", "race_record_url", "dividend_integrated_url", "first_odds_url", "second_odds_url", "third_odds_url", "corner_pace_url"}
+    if key in event_empty_keys:
+        return "EMPTY_NORMAL"
+    if phase_code in ["RACE_PREPARE", "NO_RACE_DAY"] and key in before_live_keys:
+        return "PENDING"
+    if phase_code in ["RACE_PREPARE", "RACE_LIVE", "NO_RACE_DAY"] and key in after_result_keys:
+        return "PENDING"
+    if "no_data" in low or "자료 없음" in msg or "0건" in msg or rows == 0:
+        return "EMPTY_NORMAL"
+    return "ERROR_RETRY"
+
+
+def _hub365_status_records_18round(status_df, phase_code: str = "") -> list:
+    records = []
+    try:
+        if status_df is None or not hasattr(status_df, "iterrows") or status_df.empty:
+            return records
+        for _, r in status_df.iterrows():
+            d = {str(k): ("" if v is None else v) for k, v in dict(r).items()}
+            d["표준상태"] = _hub365_api_state_18round(d, phase_code)
+            records.append(d)
+    except Exception:
+        return []
+    return records
+
+
+def _hub365_api_summary_18round(records: list) -> dict:
+    records = list(records or [])
+    counts = {"OK": 0, "EMPTY_NORMAL": 0, "PENDING": 0, "ERROR_RETRY": 0, "BLOCKED": 0, "CACHE_USED": 0}
+    total_rows = 0
+    for r in records:
+        stt = str(r.get("표준상태", "ERROR_RETRY") or "ERROR_RETRY")
+        counts[stt] = counts.get(stt, 0) + 1
+        try:
+            total_rows += int(float(str(r.get("행수", 0) or 0).replace(",", "")))
+        except Exception:
+            pass
+    success_like = counts.get("OK", 0) + counts.get("CACHE_USED", 0)
+    try:
+        total = len(records) if records else int(API_TOTAL_COUNT if "API_TOTAL_COUNT" in globals() else 26)
+    except Exception:
+        total = len(records) or 26
+    material_pct = int(max(0, min(100, round((success_like / max(1, total)) * 100))))
+    return {
+        "전체API": total,
+        "호출기록": len(records),
+        "총수신행수": total_rows,
+        "OK": counts.get("OK", 0),
+        "CACHE_USED": counts.get("CACHE_USED", 0),
+        "EMPTY_NORMAL": counts.get("EMPTY_NORMAL", 0),
+        "PENDING": counts.get("PENDING", 0),
+        "ERROR_RETRY": counts.get("ERROR_RETRY", 0),
+        "BLOCKED": counts.get("BLOCKED", 0),
+        "성공성API": success_like,
+        "자료충분도계산": f"{material_pct}%",
+        "실전추천가능": "Y" if success_like >= 6 and total_rows > 0 else "N",
+    }
+
+
+def _hub365_local_count_18round(kind: str) -> int:
+    """외부 허브가 최신 1건만 반환해도 화면에는 저장 흔적이 0으로 보이지 않게 로컬/세션까지 합산합니다."""
+    n = 0
+    try:
+        d = DATA_DIR if "DATA_DIR" in globals() else Path("maru_kra_data")
+        fp = d / f"{kind}.json"
+        if fp.exists() and fp.stat().st_size > 2:
+            try:
+                x = json.loads(fp.read_text(encoding="utf-8"))
+                if isinstance(x, list):
+                    n = max(n, len(x))
+                elif isinstance(x, dict):
+                    n = max(n, int(x.get("count", 1) or 1))
+            except Exception:
+                n = max(n, 1)
+    except Exception:
+        pass
+    try:
+        if kind == "api_status":
+            df = st.session_state.get("api_status")
+            if df is not None and hasattr(df, "__len__"):
+                n = max(n, int(len(df)))
+        if kind == "live_api_data":
+            data = st.session_state.get("live_data")
+            if isinstance(data, dict):
+                n = max(n, len(data))
+        if kind == "mobile_recommend":
+            x = st.session_state.get("_hub365_mobile_recommend_cache_once") or st.session_state.get("mobile_recommend")
+            if isinstance(x, dict) and x:
+                n = max(n, 1)
+    except Exception:
+        pass
+    return int(n)
+
+
+def _hub365_counts_18round() -> dict:
+    out = {}
+    try:
+        kinds = list(MARU_KRA_HUB_KINDS_FINAL)
+    except Exception:
+        kinds = ["mobile_recommend", "api_status", "live_api_data", "learning_bigdata", "hub_365_status", "agent_365_runs"]
+    for k in kinds:
+        try:
+            out[k] = max(int(_hub365_count(k) if "_hub365_count" in globals() else 0), _hub365_local_count_18round(k))
+        except Exception:
+            out[k] = _hub365_local_count_18round(k)
+    return out
+
+
+def _hub365_make_material_shortage_mobile_18round(latest: dict, phase: dict, api_summary: dict, source: str) -> dict:
+    latest = dict(latest or {})
+    row = dict(latest)
+    row.update({
+        "저장시각": _hub365_now_str() if "_hub365_now_str" in globals() else str(datetime.datetime.now()),
+        "상태": "자료부족 · 실전 추천 표시 차단",
+        "설명": "26개 API 순차수집 결과 핵심자료가 부족하여 실전 추천을 표시하지 않습니다. 다음 자동 실행 또는 PC 수동 실행에서 재시도합니다.",
+        "현재모드": phase.get("코드", "UNKNOWN"),
+        "경마장": latest.get("경마장", "서울"),
+        "경주번호": latest.get("경주번호", ""),
+        "데이터상태": "자료부족",
+        "실전표시불가": "Y",
+        "실전검증": "N",
+        "삼쌍승18조합": "",
+        "자료충분도": api_summary.get("자료충분도계산", "0%"),
+        "API요약": api_summary,
+        "자동구매": "없음",
+        "자동결제": "없음",
+        "source": str(source),
+        "구매표복사": "[자료부족]\n26개 API 순차수집 결과 핵심자료가 부족합니다.\n실전 추천은 표시하지 않습니다.\n다음 자동 실행 또는 PC 수동 실행 후 다시 확인하세요.",
+    })
+    return row
+
+
+def _hub365_try_actual_26api_collection_18round(latest: dict, phase: dict, source: str) -> dict:
+    """수동/Apps Script 실행 때만 26개 API 순차수집을 시도하고 상태를 허브에 저장합니다."""
+    latest = dict(latest or {})
+    phase = dict(phase or {})
+    rc_date = str(phase.get("날짜") or latest.get("날짜") or (_hub365_today() if "_hub365_today" in globals() else ""))
+    meet = str(latest.get("경마장") or "서울")
+    try:
+        race_no = int(float(str(latest.get("경주번호") or latest.get("race_no") or 1)))
+    except Exception:
+        race_no = 1
+    out = {"실행": "N", "사유": "stable_fetch_batch_and_analyze 없음", "경마장": meet, "경주번호": race_no, "날짜": rc_date, "api_summary": {}, "records": []}
+    if "stable_fetch_batch_and_analyze" not in globals():
+        return out
+    try:
+        data, status_df, rec = stable_fetch_batch_and_analyze(rc_date, meet, race_no, max_count=26, retry=1)
+        records = _hub365_status_records_18round(status_df, phase.get("코드", ""))
+        api_summary = _hub365_api_summary_18round(records)
+        out.update({"실행": "Y", "사유": "26개 API 순차수집 시도 완료", "api_summary": api_summary, "records": records})
+        try:
+            _hub365_safe_save("api_status", {"저장시각": _hub365_now_str(), "분류": "26API_SEQUENTIAL_STATUS", "source": source, "날짜": rc_date, "경마장": meet, "경주번호": race_no, "요약": api_summary, "API목록": records})
+        except Exception:
+            pass
+        try:
+            raw_summary = {}
+            if isinstance(data, dict):
+                for k, df in data.items():
+                    try:
+                        raw_summary[k] = {"행수": int(len(df)), "컬럼수": int(len(getattr(df, "columns", [])))}
+                    except Exception:
+                        raw_summary[k] = {"행수": 0, "컬럼수": 0}
+            _hub365_safe_save("api_raw_cache", {"저장시각": _hub365_now_str(), "분류": "26API_RAW_SUMMARY", "source": source, "날짜": rc_date, "경마장": meet, "경주번호": race_no, "요약": raw_summary})
+        except Exception:
+            pass
+        if isinstance(rec, dict) and rec:
+            rec = dict(rec)
+            rec.setdefault("경마장", meet)
+            rec.setdefault("경주번호", race_no)
+            rec.setdefault("날짜", rc_date)
+            rec["API요약"] = api_summary
+            rec["자료충분도"] = api_summary.get("자료충분도계산", rec.get("자료충분도", ""))
+            try:
+                rec.update(_hub365_probability_from_hub(rec) if "_hub365_probability_from_hub" in globals() else {})
+            except Exception:
+                pass
+            if api_summary.get("실전추천가능") == "Y":
+                try:
+                    save_mobile_recommend_json(rec)
+                except Exception:
+                    _hub365_safe_save("mobile_recommend", rec)
+                _hub365_safe_save("three_type_recommend", rec)
+            else:
+                shortage = _hub365_make_material_shortage_mobile_18round(rec, phase, api_summary, source)
+                try:
+                    save_mobile_recommend_json(shortage)
+                except Exception:
+                    _hub365_safe_save("mobile_recommend", shortage)
+            out["추천결과"] = rec
+        return out
+    except Exception as e:
+        err = {"실행": "오류", "오류": str(e)[:300], "경마장": meet, "경주번호": race_no, "날짜": rc_date}
+        try:
+            _hub365_safe_save("api_status", {"저장시각": _hub365_now_str(), "분류": "26API_SEQUENTIAL_ERROR", "source": source, **err})
+        except Exception:
+            pass
+        return err
+
+
+def run_hub365_cycle(source: str = "manual") -> dict:
+    """18ROUND: 에이전트 활동 + 실제 26개 API 상태 + 정확한 허브자료현황을 함께 반환/저장합니다."""
+    prev_flag = False
+    try:
+        prev_flag = bool(st.session_state.get("_hub365_network_allowed", False))
+        st.session_state["_hub365_network_allowed"] = True
+    except Exception:
+        pass
+    latest = {}
+    try:
+        latest = load_mobile_recommend_json() if "load_mobile_recommend_json" in globals() else {}
+    except Exception:
+        latest = {}
+    phase = _hub365_phase(latest) if "_hub365_phase" in globals() else {"코드": "UNKNOWN"}
+    started = _hub365_now_str() if "_hub365_now_str" in globals() else str(datetime.datetime.now())
+    try:
+        base_result = _run_hub365_cycle_core_17round(source) if callable(_run_hub365_cycle_core_17round) else {"ok": True, "상태": "core 없음"}
+    except Exception as e:
+        base_result = {"ok": False, "상태": "기존 허브365 코어 오류", "오류": str(e)[:300]}
+    try:
+        latest_after_core = load_mobile_recommend_json() if "load_mobile_recommend_json" in globals() else latest
+    except Exception:
+        latest_after_core = latest
+    phase_after = _hub365_phase(latest_after_core) if "_hub365_phase" in globals() else phase
+    collect_result = _hub365_try_actual_26api_collection_18round(latest_after_core, phase_after, source)
+    counts = _hub365_counts_18round()
+    api_summary = dict(collect_result.get("api_summary") or {})
+    status = {
+        "저장시각": _hub365_now_str() if "_hub365_now_str" in globals() else str(datetime.datetime.now()),
+        "버전": "cloud_hub_365_final_v18_actual_api_status",
+        "실행출처": source,
+        "시작시각": started,
+        "SHEET_ID": MARU_KRA_FIXED_SHEET_ID if "MARU_KRA_FIXED_SHEET_ID" in globals() else "",
+        "허브중심": "ON",
+        "현재모드": phase_after,
+        "에이전트활동저장": "Y",
+        "5명활동": {
+            "해": "수집자료/확률/추천표시 가능 여부 최종 판단",
+            "달": "경주일·경주후·경주없음 모드 판정",
+            "별": "26개 API 순차수집 상태 기록",
+            "구름": "EMPTY/PENDING/ERROR_RETRY/BLOCKED 변수 분류",
+            "비": "자료부족/성공실패 원인 학습 저장",
+        },
+        "기존코어결과": base_result,
+        "26개API순차수집": collect_result,
+        "API요약": api_summary,
+        "허브자료현황": counts,
+        "자료충분도": api_summary.get("자료충분도계산", "계산대기"),
+        "실전추천가능": api_summary.get("실전추천가능", "N"),
+        "자동구매": "없음",
+        "자동결제": "없음",
+        "마권구매": "공식 구매 페이지에서 사용자가 직접 입력·확정",
+    }
+    try:
+        _hub365_safe_save("hub_365_status", status)
+        _hub365_safe_save("agent_365_runs", status)
+        if api_summary:
+            _hub365_safe_save("probability_memory", {"저장시각": status["저장시각"], "source": source, "API요약": api_summary, "자료충분도": status.get("자료충분도"), "실전추천가능": status.get("실전추천가능")})
+    except Exception:
+        pass
+    finally:
+        try:
+            st.session_state["_hub365_network_allowed"] = bool(prev_flag)
+        except Exception:
+            pass
+    return status
 
 if __name__ == "__main__":
     if "_hub365_is_background_tick_request" in globals() and _hub365_is_background_tick_request():
