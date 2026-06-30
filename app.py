@@ -10791,3 +10791,124 @@ if __name__ == "__main__":
                 pass
     else:
         render()
+
+# =============================================================================
+# 20ROUND_HUB_SAVE_VISIBILITY_DIAGNOSTIC_FIX
+# 목적:
+# - 허브 365 버튼을 눌렀는데 구글시트에 결과가 안 보이는 문제를 바로 확인할 수 있게 합니다.
+# - 실행 시작 즉시 hub_365_status / agent_365_runs / api_status / mobile_recommend에 진단 기록을 저장합니다.
+# - 이후 실제 26개 API 수집/분석/추천 흐름을 실행합니다.
+# - 버튼 실행 성공/실패가 화면과 구글시트에 보이도록 저장결과를 함께 남깁니다.
+# =============================================================================
+MARU_KRA_FINAL_PRECHECK_ROUND = "20ROUND"
+try:
+    _run_hub365_cycle_core_19round = run_hub365_cycle
+except Exception:
+    _run_hub365_cycle_core_19round = None
+
+
+def _hub365_external_config_visible_20round() -> dict:
+    try:
+        url, token = _external_hub_config() if "_external_hub_config" in globals() else ("", "")
+    except Exception:
+        url, token = "", ""
+    return {
+        "url_exists": "Y" if str(url).startswith("https://") else "N",
+        "url_preview": (str(url)[:52] + "...") if url else "",
+        "token_exists": "Y" if token else "N",
+    }
+
+
+def _hub365_force_visible_save_20round(kind: str, payload: dict) -> dict:
+    payload = dict(payload or {})
+    payload.setdefault("저장시각", _hub365_now_str() if "_hub365_now_str" in globals() else str(datetime.datetime.now()))
+    payload.setdefault("저장진단", "20ROUND_FORCE_VISIBLE_SAVE")
+    payload.setdefault("자동구매", "없음")
+    payload.setdefault("자동결제", "없음")
+    result = {"kind": kind, "external_ok": "N", "local_ok": "N", "error": ""}
+    try:
+        if "external_hub_save" in globals():
+            ok = bool(external_hub_save(kind, payload))
+            result["external_ok"] = "Y" if ok else "N"
+        else:
+            result["error"] = "external_hub_save 없음"
+    except Exception as e:
+        result["error"] = str(e)[:200]
+    try:
+        d = DATA_DIR if "DATA_DIR" in globals() else Path("maru_kra_data")
+        d.mkdir(parents=True, exist_ok=True)
+        (d / f"{kind}.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+        result["local_ok"] = "Y"
+    except Exception as e:
+        result["error"] = (result.get("error", "") + " | local:" + str(e)[:120]).strip(" |")
+    try:
+        st.session_state.setdefault("_hub365_last_save_diagnostics", []).append(result)
+    except Exception:
+        pass
+    return result
+
+
+def _hub365_start_visibility_payload_20round(source: str) -> dict:
+    return {
+        "버전": "20ROUND_HUB_SAVE_VISIBILITY_DIAGNOSTIC_FIX",
+        "실행출처": source,
+        "상태": "허브365 실행 시작 · 구글시트 저장 진단",
+        "설명": "이 기록이 보이면 Streamlit → Apps Script → Google Sheet 저장 통로가 살아 있습니다.",
+        "SHEET_ID": MARU_KRA_FIXED_SHEET_ID if "MARU_KRA_FIXED_SHEET_ID" in globals() else "",
+        "GID": MARU_KRA_FIXED_GID if "MARU_KRA_FIXED_GID" in globals() else "",
+        "외부허브설정": _hub365_external_config_visible_20round(),
+        "자동구매": "없음",
+        "자동결제": "없음",
+    }
+
+
+def run_hub365_cycle(source: str = "manual") -> dict:
+    """20ROUND: 버튼 클릭 즉시 시트에 보이는 진단 저장 후 실제 허브365를 실행합니다."""
+    started = _hub365_now_str() if "_hub365_now_str" in globals() else str(datetime.datetime.now())
+    source = str(source or "manual")
+    start_payload = _hub365_start_visibility_payload_20round(source)
+    start_payload["저장시각"] = started
+
+    # 1) 눈에 바로 보여야 하는 진단 기록을 먼저 저장합니다.
+    save_results = []
+    save_results.append(_hub365_force_visible_save_20round("hub_365_status", dict(start_payload, 탭확인="hub_365_status")))
+    save_results.append(_hub365_force_visible_save_20round("agent_365_runs", dict(start_payload, 탭확인="agent_365_runs", 해="활동시작", 달="활동시작", 별="활동시작", 구름="활동시작", 비="활동시작")))
+    save_results.append(_hub365_force_visible_save_20round("api_status", dict(start_payload, 탭확인="api_status", 분류="START_DIAGNOSTIC", API상태="수집 전 진단 기록")))
+    save_results.append(_hub365_force_visible_save_20round("mobile_recommend", dict(start_payload, 탭확인="mobile_recommend", 상태="허브365 실행중 · 결과 저장 대기", 실전표시불가="Y", 구매표복사="[허브365 실행중]\n자료 수집/분석 후 갱신됩니다.")))
+
+    # 2) 실제 기존 허브365 흐름 실행.
+    core_result = {}
+    try:
+        if callable(_run_hub365_cycle_core_19round):
+            core_result = _run_hub365_cycle_core_19round(source)
+        else:
+            core_result = {"ok": False, "error": "core run_hub365_cycle 없음"}
+    except Exception as e:
+        core_result = {"ok": False, "error": str(e)[:500], "자동구매": "없음", "자동결제": "없음"}
+
+    # 3) 끝났다는 기록도 별도 저장.
+    end_payload = {
+        "저장시각": _hub365_now_str() if "_hub365_now_str" in globals() else str(datetime.datetime.now()),
+        "버전": "20ROUND_HUB_SAVE_VISIBILITY_DIAGNOSTIC_FIX",
+        "실행출처": source,
+        "상태": "허브365 실행 완료 · 저장 진단 포함",
+        "시작저장결과": save_results,
+        "기존실행결과": core_result,
+        "외부허브설정": _hub365_external_config_visible_20round(),
+        "자동구매": "없음",
+        "자동결제": "없음",
+    }
+    end_save = _hub365_force_visible_save_20round("hub_365_status", end_payload)
+    try:
+        _hub365_force_visible_save_20round("agent_365_runs", dict(end_payload, 해="완료", 달="완료", 별="완료", 구름="완료", 비="완료"))
+    except Exception:
+        pass
+    end_payload["최종저장결과"] = end_save
+    return end_payload
+
+# 20ROUND: render_hub365_final_center에서 사용할 버튼 key 중복 재방지용 보조 함수
+try:
+    _hub365_button_key_suffix_20round = str(int(time.time() * 1000))[-6:]
+except Exception:
+    _hub365_button_key_suffix_20round = "20r"
+
