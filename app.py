@@ -792,7 +792,7 @@ def render_18ticket_cards(latest: Dict[str, Any]) -> None:
 
         copy_text = latest.get("구매표복사", "")
         if copy_text:
-            st.text_area("18마권 전체 복사", value=copy_text, height=260)
+            st.text_area("18마권 전체 복사", value=copy_text, height=260, key="ticket_copy_area_18")
     except Exception as e:
         st.caption(f"18마권 표시 대기: {e}")
 
@@ -1094,7 +1094,7 @@ def try_push_hub_file_to_github(relative_path: str, content_text: str, message: 
 DERBYON_BUY_URL = "https://todayrace.kra.co.kr"
 CLOUD_APP_URL = "https://maru-kra-final-clean.streamlit.app/?mode=mobile"
 CLOUD_MOBILE_URL = "https://maru-kra-final-clean.streamlit.app/?mode=mobile"
-CLOUD_PC_URL = "https://maru-kra-final-clean.streamlit.app/?mode=mobile/?mode=pc"
+CLOUD_PC_URL = "https://maru-kra-final-clean.streamlit.app/?mode=pc"
 KRA_BUY_URLS = {
     "서울": DERBYON_BUY_URL,
     "부산경남": DERBYON_BUY_URL,
@@ -2124,20 +2124,20 @@ def render_stable_bet_module(result: Dict[str, Any], meet: str) -> None:
     default_sub = safe_int(result.get("보조마", 10), 10)
     default_hole = safe_int(result.get("구멍마", 5), 5)
     with c1:
-        axis = st.number_input("축마", min_value=1, max_value=20, value=default_axis, step=1)
+        axis = st.number_input("축마", min_value=1, max_value=20, value=default_axis, step=1, key="stable_plan_axis_no")
     with c2:
-        mate = st.number_input("상대마", min_value=1, max_value=20, value=default_mate, step=1)
+        mate = st.number_input("상대마", min_value=1, max_value=20, value=default_mate, step=1, key="stable_plan_mate_no")
     with c3:
-        sub = st.number_input("보조마", min_value=1, max_value=20, value=default_sub, step=1)
+        sub = st.number_input("보조마", min_value=1, max_value=20, value=default_sub, step=1, key="stable_plan_sub_no")
     with c4:
-        hole = st.number_input("구멍마", min_value=1, max_value=20, value=default_hole, step=1)
+        hole = st.number_input("구멍마", min_value=1, max_value=20, value=default_hole, step=1, key="stable_plan_hole_no")
 
     tmp_result = {**result, "축마": axis, "상대마": mate, "보조마": sub, "구멍마": hole}
     b1, b2 = st.columns([1, 1])
     with b1:
-        budget = st.number_input("총 구매 기준", min_value=1000, max_value=100000, value=18000, step=1000)
+        budget = st.number_input("총 구매 기준", min_value=1000, max_value=100000, value=18000, step=1000, key="stable_plan_budget")
     with b2:
-        preset = st.selectbox("구매 전략", ["안정형", "보수형", "수익형"], index=0)
+        preset = st.selectbox("구매 전략", ["안정형", "보수형", "수익형"], index=0, key="stable_plan_preset")
 
     plan = stable_plan_from_result(tmp_result, int(budget), preset)
     st.markdown("#### ✅ 기본 추천 조합")
@@ -2756,13 +2756,13 @@ def _external_hub_config() -> Tuple[str, str]:
     url = ""
     token = ""
     try:
-        url = str(st.secrets.get("GOOGLE_SCRIPT_URL", "") or "").strip()
-        token = str(st.secrets.get("GOOGLE_SCRIPT_TOKEN", "") or "").strip()
+        url = str(st.secrets.get("GOOGLE_SCRIPT_URL", "") or st.secrets.get("GOOGLE_APPS_SCRIPT_WEBAPP_URL", "") or "").strip()
+        token = str(st.secrets.get("GOOGLE_SCRIPT_TOKEN", "") or st.secrets.get("MARU_KRA_TOKEN", "") or "").strip()
     except Exception:
         pass
     try:
-        url = url or str(os.environ.get("GOOGLE_SCRIPT_URL", "") or "").strip()
-        token = token or str(os.environ.get("GOOGLE_SCRIPT_TOKEN", "") or "").strip()
+        url = url or str(os.environ.get("GOOGLE_SCRIPT_URL", "") or os.environ.get("GOOGLE_APPS_SCRIPT_WEBAPP_URL", "") or "").strip()
+        token = token or str(os.environ.get("GOOGLE_SCRIPT_TOKEN", "") or os.environ.get("MARU_KRA_TOKEN", "") or "").strip()
     except Exception:
         pass
     return url, token
@@ -2793,7 +2793,26 @@ def external_hub_save(kind: str, payload: Dict[str, Any]) -> bool:
         return False
 
 def external_hub_load(kind: str = "mobile_recommend") -> Dict[str, Any]:
-    """Google Apps Script 허브에서 최신 JSON을 읽습니다."""
+    """Google Apps Script 허브에서 최신 JSON을 읽습니다.
+
+    11ROUND_EXTERNAL_LOAD_GUARD:
+    - 일반 PC/모바일 화면에서는 mobile_recommend 1건만 외부 허브에서 읽습니다.
+    - learning_bigdata/agent_runs 같은 무거운 허브 조회는 Apps Script tick 또는 수동 실행 때만 허용합니다.
+    - 같은 화면 렌더링 안에서는 kind별 1회 캐시를 써서 반복 호출을 막습니다.
+    """
+    try:
+        allow_network = "_hub365_network_allowed" in globals() and _hub365_network_allowed()
+    except Exception:
+        allow_network = False
+    if (not allow_network) and str(kind) != "mobile_recommend":
+        return {}
+    cache_key = f"_external_hub_load_cache_{kind}"
+    try:
+        cached = st.session_state.get(cache_key)
+        if isinstance(cached, dict) and cached:
+            return cached
+    except Exception:
+        pass
     url, token = _external_hub_config()
     if not url:
         return {}
@@ -2804,7 +2823,13 @@ def external_hub_load(kind: str = "mobile_recommend") -> Dict[str, Any]:
         data = r.json()
         if isinstance(data, dict):
             payload = data.get("payload", data)
-            return payload if isinstance(payload, dict) else {}
+            out = payload if isinstance(payload, dict) else {}
+            try:
+                if out:
+                    st.session_state[cache_key] = out
+            except Exception:
+                pass
+            return out
     except Exception:
         pass
     return {}
@@ -2937,17 +2962,37 @@ def _save_current_race_status_to_external(row: Dict[str, Any]) -> None:
 
 
 def load_mobile_recommend_json() -> Dict[str, Any]:
-    # MOBILE_PC_SYNC_SANITIZE_LOAD: 외부허브/로컬 모두 읽은 뒤 stale row 정리
+    # 13ROUND_HUB_READ_CACHE:
+    # - 한 번의 화면 렌더링에서 같은 mobile_recommend를 여러 번 외부 호출하지 않습니다.
+    # - 모바일/PC 일반 화면은 추천 결과 읽기만 허용하고, 저장/수집은 하지 않습니다.
+    cache_key = "_hub365_mobile_recommend_cache_once"
+    try:
+        cached = st.session_state.get(cache_key)
+        if isinstance(cached, dict) and cached:
+            return _sanitize_mobile_loaded_row(cached)
+    except Exception:
+        pass
     try:
         hub_data = external_hub_load("mobile_recommend") if "external_hub_load" in globals() else {}
         if isinstance(hub_data, dict) and hub_data:
-            return _sanitize_mobile_loaded_row(hub_data)  # MOBILE_PC_SYNC_SANITIZE_HUB
+            row = _sanitize_mobile_loaded_row(hub_data)  # MOBILE_PC_SYNC_SANITIZE_HUB
+            try:
+                st.session_state[cache_key] = row
+            except Exception:
+                pass
+            return row
     except Exception:
         pass
     try:
         if MOBILE_RECOMMEND_FILE.exists():
             data = json.loads(MOBILE_RECOMMEND_FILE.read_text(encoding="utf-8"))
-            return _sanitize_mobile_loaded_row(data) if isinstance(data, dict) else {}  # MOBILE_PC_SYNC_SANITIZE_LOCAL
+            row = _sanitize_mobile_loaded_row(data) if isinstance(data, dict) else {}  # MOBILE_PC_SYNC_SANITIZE_LOCAL
+            try:
+                if row:
+                    st.session_state[cache_key] = row
+            except Exception:
+                pass
+            return row
     except Exception:
         pass
     return {}
@@ -3568,9 +3613,11 @@ def _run_five_agents(row: Dict[str, Any]) -> Dict[str, Any]:
         race_no = int(float(row.get("경주번호", 1) or 1))
         if "_auto_collect_window_by_schedule" in globals():
             ok, reason, target_no = _auto_collect_window_by_schedule(rc_date, meet, race_no)
-            report["달"] = reason
-            if target_no:
-                row["경주번호"] = int(target_no)
+            # 14ROUND_AGENT_TARGET_LOCK: 시간표 감시는 참고만 하고, 이미 수집/분석 중인 경주번호는 바꾸지 않음
+            if target_no and int(target_no) != int(race_no):
+                report["달"] = f"{reason} · 현재 추천대상 {race_no}R 유지"
+            else:
+                report["달"] = reason
         else:
             report["달"] = "한국시간 기준 대기"
     except Exception as e:
@@ -3946,7 +3993,7 @@ def _render_mobile_compact_3type_view(row: Dict[str, Any]) -> None:
     copy_text = _three_type_mobile_ticket(row) if "_three_type_mobile_ticket" in globals() else str(row.get("구매표복사", ""))
     c1, c2 = st.columns(2)
     with c1:
-        st.download_button("📋 18장 텍스트", copy_text, file_name=f"maru_{meet}_{race_no}R_18tickets.txt")
+        st.download_button("📋 18장 텍스트", copy_text, file_name=f"maru_{meet}_{race_no}R_18tickets.txt", key="mobile_3type_18tickets_download")
     with c2:
         st.link_button("↗ 더비온 열기", "https://www.derbyon.co.kr")
 
@@ -3979,6 +4026,8 @@ def _character_growth_phase() -> Dict[str, Any]:
 def _agent_growth_from_hub() -> Dict[str, Any]:
     stat = {"learning_count": 0, "agent_runs": 0, "web_patrol": 0, "comm_ok": 0, "apply_count": 0}
     try:
+        if "_hub365_network_allowed" in globals() and not _hub365_network_allowed():
+            return stat
         if "external_hub_load" in globals():
             learn = external_hub_load("learning_bigdata")
             runs = external_hub_load("agent_runs")
@@ -4191,8 +4240,15 @@ def _current_or_next_races(sched: pd.DataFrame, per_meet: int = 3) -> pd.DataFra
 def render_all_meet_all_race_monitor(rc_date: str, selected: List[str], sim_count: int, risk_mode: str) -> None:
     """서울 1R 고정 대신 모든 경마장/모든 경주일정을 확인하는 전체 관제 화면."""
     st.markdown("### 🌐 전체 경마장 · 전체 경주일정 관제")
-    st.info("시간락은 결과/배당 대기 API 과호출 방지용입니다. 경주정보·출전표·말정보 기본 API는 즉시 점검합니다.")  # TIME_LOCK_EXPLANATION_APPLY
-    st.caption("서울/부산경남/제주 경주일정을 모두 확인하고, 현재 수집창에 들어온 경주를 자동 점검합니다.")
+    st.info("PC 화면 진입만으로 전체 경마장 API를 수집하지 않습니다. 필요할 때 아래 버튼을 한 번만 누르세요.")
+    st.caption("Apps Script 백그라운드 호출(agent_tick=1) 또는 수동 버튼일 때만 관제를 실행합니다.")
+
+    manual_run = st.button("🌐 전체 경마장 관제 1회 실행", key="all_meet_monitor_manual_run_once")
+    if not manual_run and not (_hub365_network_allowed() if "_hub365_network_allowed" in globals() else False):
+        st.warning("대기 중 · 자동수집 차단됨. PC 화면에서는 버튼을 눌렀을 때만 1회 실행합니다.")
+        return
+    if manual_run:
+        st.session_state["_hub365_network_allowed"] = True
 
     sched, log_df = load_all_meet_schedule_for_monitor(rc_date)
     if sched.empty:
@@ -4320,7 +4376,9 @@ def _source_truth_snapshot(data=None, status_df=None, selected=None, collection_
         pass
 
     try:
-        if "external_hub_load" in globals():
+        if "_hub365_network_allowed" in globals() and not _hub365_network_allowed():
+            snap["허브상태"]["외부조회"] = "화면진입 자동조회 차단"
+        elif "external_hub_load" in globals():
             for name in ["mobile_recommend", "three_type_recommend", "learning_bigdata", "api_schedule_status", "api_received_files", "pipeline_reason_snapshot"]:
                 try:
                     val = external_hub_load(name)
@@ -4481,7 +4539,9 @@ def _pipeline_reason_snapshot(rc_date: str = "", meet: str = "서울", race_no: 
         snap["원인"].append(f"추천 저장 확인 실패: {str(e)[:80]}")
 
     try:
-        if "external_hub_load" in globals():
+        if "_hub365_network_allowed" in globals() and not _hub365_network_allowed():
+            snap["허브"]["mobile_recommend"] = "화면진입 자동조회 차단"
+        elif "external_hub_load" in globals():
             hub_mobile = external_hub_load("mobile_recommend")
             snap["허브"]["mobile_recommend"] = "있음" if hub_mobile else "없음"
         else:
@@ -4956,7 +5016,9 @@ def render_direct_schedule_excel_viewer(compact: bool = False) -> None:
 
     cache_key = f"direct_all_meet_schedule_{rc_date}"
     log_key = f"direct_all_meet_schedule_log_{rc_date}"
-    if force or cache_key not in st.session_state:
+    # NO_AUTO_SPIN_HARD_STOP: 화면 진입만으로 경주일정 API를 호출하지 않습니다.
+    # 반드시 사용자가 [일정 다시 받기] 버튼을 눌렀을 때만 1회 수집합니다.
+    if force:
         with st.spinner("서울·부산경남·제주 경주일정 API 직접 수신 중..."):
             sched, log_df = fetch_all_meet_schedule_direct(rc_date)
             st.session_state[cache_key] = sched
@@ -4964,6 +5026,9 @@ def render_direct_schedule_excel_viewer(compact: bool = False) -> None:
     else:
         sched = st.session_state.get(cache_key, pd.DataFrame())
         log_df = st.session_state.get(log_key, pd.DataFrame())
+        if not isinstance(sched, pd.DataFrame) or sched.empty:
+            st.info("대기 중 · 화면 진입만으로 경주일정 API를 수집하지 않습니다. 필요할 때 [서울·부산경남·제주 일정 다시 받기]를 한 번만 누르세요.")
+            return
 
     if isinstance(sched, pd.DataFrame) and not sched.empty:
         meet_col = "경마장" if "경마장" in sched.columns else None
@@ -5294,8 +5359,10 @@ def _save_api_schedule_snapshot(status_df=None, data=None) -> Dict[str, Any]:
     return snap
 
 def render_api_schedule_visibility_center(status_df=None, data=None) -> None:
-    """PC에서 26개 API·경주일정·추천저장 상태를 한눈에 보여줍니다."""
-    snap = _save_api_schedule_snapshot(status_df, data)
+    """PC에서 26개 API·경주일정·추천저장 상태를 한눈에 보여줍니다.
+    화면 진입만으로 허브 저장을 하지 않고, 현재 세션/캐시 상태만 표시합니다.
+    """
+    snap = _api_status_summary_dict(status_df, data)
     st.markdown("### 🔎 26개 API · 경주일정 · 추천저장 확인센터")
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("API 성공", f"{snap.get('성공',0)} / {snap.get('총API',0)}")
@@ -5316,9 +5383,11 @@ def render_api_schedule_visibility_center(status_df=None, data=None) -> None:
         st.json({k: v for k, v in snap.items() if k != "rows"})
 
 def render_mobile_api_schedule_status() -> None:
-    """모바일 하단에 간단한 API/일정/추천 상태 표시."""
+    """모바일 하단에 간단한 API/일정/추천 상태 표시.
+    모바일 화면 보기만으로 허브 저장/수집을 하지 않습니다.
+    """
     try:
-        snap = _save_api_schedule_snapshot()
+        snap = _api_status_summary_dict()
         st.markdown("### 🔎 수집 상태")
         st.caption(f"확인 {snap.get('확인시각','-')}")
         a, b, c = st.columns(3)
@@ -5506,11 +5575,11 @@ def _render_mobile_end_or_wait_view(row: Dict[str, Any]) -> None:
 def render_mobile_quick_view() -> None:
     # MOBILE_REAL_COMPACT_RENDER_ONLY
     # MOBILE_NO_BLANK_RENDER_GATE
-    # NO_CLICK_API_VIEWER_MOBILE_APPLY
-    # EXCEL_DETAIL_CENTER_MOBILE_APPLY
+    # 9ROUND_MOBILE_HARD_VIEW_ONLY: 모바일은 허브 추천 결과만 표시합니다.
+    # 자동 새로고침/경주일정/API 엑셀 뷰어/상세 수집 뷰어를 호출하지 않습니다.
     # PIPELINE_REASON_CENTER_MOBILE_APPLY
     # SOURCE_TRUTH_CENTER_MOBILE_APPLY
-    if "_install_auto_refresh" in globals():
+    if False and "_install_auto_refresh" in globals():
         _install_auto_refresh(60, "mobile_compact")
     try:
         latest = load_mobile_recommend_json() if "load_mobile_recommend_json" in globals() else {}
@@ -5544,8 +5613,9 @@ def render_mobile_quick_view() -> None:
     except Exception:
         pass
 
-    if not _mobile_has_any_real_recommend(latest):
-        latest = _mobile_generate_real_recommend_now(latest)  # MOBILE_RACE_TIME_SELF_ANALYZE_APPLY
+    if False and not _mobile_has_any_real_recommend(latest):
+        # 모바일은 허브 추천결과만 표시합니다. 화면 진입만으로 API 수집/분석/허브저장을 하지 않습니다.
+        latest = _mobile_generate_real_recommend_now(latest)  # MOBILE_RACE_TIME_SELF_ANALYZE_APPLY_DISABLED
         try:
             if "_mobile_compact_summary" in globals():
                 latest = _mobile_compact_summary(latest)
@@ -5567,14 +5637,14 @@ def render_mobile_quick_view() -> None:
             return
 
     _render_mobile_compact_3type_view(latest)
-    render_pipeline_reason_center("", "서울", "", compact=True)  # PIPELINE_REASON_CENTER_MOBILE_APPLY
-    render_source_truth_center(st.session_state.get("live_data", {}), st.session_state.get("api_status", pd.DataFrame()), None, st.session_state.get("collection_mode", "실시간 API 우선 + 허브 보조"))  # SOURCE_TRUTH_CENTER_MOBILE_APPLY
-    render_mobile_character_strip()  # MOBILE_CHARACTER_STRIP_APPLY
-    render_mobile_api_schedule_status()  # MOBILE_API_STATUS_RENDER_APPLY
-    render_direct_schedule_excel_viewer(compact=True)  # DIRECT_SCHEDULE_VIEWER_MOBILE_APPLY
-    render_no_click_api_excel_viewer(compact=True, meet="서울")  # NO_CLICK_API_VIEWER_MOBILE_APPLY
-    render_excel_detail_workbook_center(st.session_state.get("live_data", {}), st.session_state.get("api_status", pd.DataFrame()), compact=True)  # EXCEL_DETAIL_CENTER_MOBILE_APPLY
-    render_api_received_file_viewer(st.session_state.get("live_data", {}), st.session_state.get("api_status", pd.DataFrame()), compact=True)  # MOBILE_API_RECEIVED_FILE_VIEWER_APPLY
+    # 9ROUND: 모바일 화면 진입만으로 API/경주일정/엑셀 상세 뷰어를 돌리지 않습니다.
+    # 필요한 상태 표시는 허브 365 요약만 가볍게 보여줍니다.
+    try:
+        if "render_hub365_final_center" in globals():
+            render_hub365_final_center(compact=True)
+    except Exception:
+        pass
+    st.caption("모바일은 허브 mobile_recommend 추천결과만 표시합니다. 자동수집/자동구매/자동결제 없음.")
     return
 
 
@@ -5697,15 +5767,15 @@ def render_smart_collection_panel(rc_date: str, meet: str, race_no: int) -> None
 
     c1, c2, c3 = st.columns(3)
     with c1:
-        if st.button("🌅 오늘 아침 사전수집", width="stretch"):
+        if st.button("🌅 오늘 아침 사전수집", width="stretch", key="api_mode_morning_collect"):
             st.session_state["collection_mode"] = "아침 사전수집"
             st.rerun()
     with c2:
-        if st.button("⚡ 경주 직전 실시간만", width="stretch"):
+        if st.button("⚡ 경주 직전 실시간만", width="stretch", key="api_mode_live_only"):
             st.session_state["collection_mode"] = "실시간 집중"
             st.rerun()
     with c3:
-        if st.button("📦 허브만 불러오기", width="stretch"):
+        if st.button("📦 허브만 불러오기", width="stretch", key="api_mode_hub_only"):
             st.session_state["collection_mode"] = "허브만 분석"
             st.rerun()
 
@@ -6009,10 +6079,12 @@ def _web_patrol_summary_text(report: Dict[str, Any]) -> str:
 
 def _auto_web_patrol_if_due() -> Dict[str, Any]:
     """
-    자동 순찰은 5분 단위 수집창과 맞춰 가볍게 실행.
-    Streamlit 재실행 특성상 session_state로 중복 호출을 줄임.
+    자동 순찰은 화면 진입 때 돌지 않습니다.
+    Apps Script/background tick 또는 사용자가 허용한 경우에만 실행합니다.
     """
     try:
+        if "_hub365_network_allowed" in globals() and not _hub365_network_allowed():
+            return {}
         now = now_kst() if "now_kst" in globals() else datetime.datetime.now()
         key = f"web_patrol_{now.strftime('%Y%m%d_%H%M')}"
         if now.minute % 5 != 0:
@@ -6197,7 +6269,9 @@ def _weekly_agent_status_text() -> str:
         f"현재상태: {phase.get('label')}",
     ]
     try:
-        active = external_hub_load("active_strategy") if "external_hub_load" in globals() else {}
+        active = {}
+        if not ("_hub365_network_allowed" in globals() and not _hub365_network_allowed()):
+            active = external_hub_load("active_strategy") if "external_hub_load" in globals() else {}
         if isinstance(active, dict) and active:
             lines.append(f"활성전략 적용시각: {active.get('적용시각','')}")
             lines.append(f"추천가중치: {active.get('추천가중치',{})}")
@@ -6209,16 +6283,18 @@ def render_weekly_agent_center() -> None:
     try:
         st.markdown("### 🗓️ 주간 AI 에이전트 운영")
         st.caption("월화수목은 허브에서 운영/누적, 금요일 오전 7시에 전략 적용합니다.")
-        tick = _weekly_agent_tick()
+        tick = st.session_state.get("weekly_agent_last_tick", {"상태": "대기", "메모": "화면 진입만으로 자동 실행하지 않습니다."})
         with st.expander("주간 운영 상태", expanded=False):
             st.text(_weekly_agent_status_text())
             st.json(tick)
         c1, c2, c3 = st.columns(3)
-        if c1.button("월화수목 허브운영 즉시 실행"):
-            st.json(_weekly_hub_agent_train_once())
-        if c2.button("금요일 07시 전략 적용 확인"):
-            st.json(_weekly_agent_apply_if_due())
-        if c3.button("active_strategy 보기"):
+        if c1.button("월화수목 허브운영 즉시 실행", key="weekly_hub_train_once_btn"):
+            st.session_state["weekly_agent_last_tick"] = _weekly_hub_agent_train_once()
+            st.json(st.session_state["weekly_agent_last_tick"])
+        if c2.button("금요일 07시 전략 적용 확인", key="weekly_strategy_apply_btn"):
+            st.session_state["weekly_agent_last_tick"] = _weekly_agent_apply_if_due()
+            st.json(st.session_state["weekly_agent_last_tick"])
+        if c3.button("active_strategy 보기", key="weekly_active_strategy_view_btn"):
             try:
                 st.json(external_hub_load("active_strategy") if "external_hub_load" in globals() else {})
             except Exception as e:
@@ -6261,7 +6337,10 @@ def _comm_status_snapshot() -> Dict[str, Any]:
         "권장조치": [],
     }
     try:
-        if "external_hub_load" in globals():
+        if "_hub365_network_allowed" in globals() and not _hub365_network_allowed():
+            snap["GoogleSheet허브"] = "화면진입 자동조회 차단"
+            mobile = three = learn = patrol = {}
+        elif "external_hub_load" in globals():
             mobile = external_hub_load("mobile_recommend")
             three = external_hub_load("three_type_recommend")
             learn = external_hub_load("learning_bigdata")
@@ -6398,18 +6477,18 @@ def render_self_learning_control_center() -> None:
         st.markdown("### 🧠 자가학습 운영센터")
         st.caption("스스로 데이터는 누적하지만, 코드 적용/배포와 구매/결제는 사람 확인이 필요합니다.")
         c1, c2, c3 = st.columns(3)
-        if c1.button("통신점검 저장"):
+        if c1.button("통신점검 저장", key="self_learning_save_comm_status"):
             _save_comm_status_snapshot()
             st.success("comm_status 저장 완료")
-        if c2.button("수익효율 학습요약"):
+        if c2.button("수익효율 학습요약", key="self_learning_profit_summary"):
             st.json(_profit_efficiency_learning())
-        if c3.button("코드개선 제안"):
+        if c3.button("코드개선 제안", key="self_learning_code_suggest"):
             st.json(_code_improvement_suggestions())
         with st.expander("자가학습 상태 보기", expanded=False):
             st.text(_self_learning_status_text())
         with st.expander("로그 붙여넣고 코드개선 제안 받기", expanded=False):
             log_text = st.text_area("오류 로그/Streamlit 로그", height=180, key="self_learning_log_text")
-            if st.button("로그 분석 후 제안 저장"):
+            if st.button("로그 분석 후 제안 저장", key="self_learning_log_suggest_save"):
                 st.json(_code_improvement_suggestions(log_text))
     except Exception as e:
         st.warning(f"자가학습 운영센터 표시 오류: {e}")
@@ -6600,18 +6679,18 @@ def _pc_command_execute(cmd: str, current_row: Dict[str, Any] = None) -> str:
 def render_pc_command_console(current_row: Dict[str, Any] = None) -> None:
     """PC 전용 명령 입력창."""
     try:
-        auto_patrol = _auto_web_patrol_if_due()  # WEB_PATROL_AUTO_RENDER
+        # 화면 진입만으로 웹 순찰을 실행하지 않습니다.
         st.markdown("### 🧭 PC 명령 입력창")
         st.caption("예: 해 상태 / 달 자동수집 상태 / 3분류 추천 보여줘 / 비 학습요약 / 모바일 주소")
         with st.form("maru_pc_command_form", clear_on_submit=False):
-            cmd = st.text_input("명령 입력", value=st.session_state.get("last_pc_command", ""), placeholder="예: 3분류 추천 보여줘")
-            run_cmd = st.form_submit_button("명령 실행")
+            cmd = st.text_input("명령 입력", value=st.session_state.get("last_pc_command", ""), placeholder="예: 3분류 추천 보여줘", key="pc_command_input")
+            run_cmd = st.form_submit_button("명령 실행", key="pc_command_form_submit")
         if run_cmd:
             st.session_state["last_pc_command"] = cmd
             st.session_state["last_pc_command_result"] = _pc_command_execute(cmd, current_row or {})
         result = st.session_state.get("last_pc_command_result", "")
         if result:
-            st.text_area("명령 결과", value=result, height=260)
+            st.text_area("명령 결과", value=result, height=260, key="pc_command_result_area")
     except Exception as e:
         st.warning(f"명령 입력창 표시 오류: {e}")
 
@@ -6624,9 +6703,9 @@ def render_live_panel(rc_date: str, meet: str, race_no: int, selected: List[str]
 
     col_a, col_b = st.columns([1, 1])
     with col_a:
-        run = st.button("실시간 데이터 새로고침", type="primary")
+        run = st.button("실시간 데이터 새로고침", type="primary", key="live_data_refresh_btn")
     with col_b:
-        run_sim = st.button("불러오기 + 시뮬레이션")
+        run_sim = st.button("불러오기 + 시뮬레이션", key="live_load_sim_btn")
 
     current_race_key = f"{rc_date}|{meet}|{int(race_no)}"
     previous_race_key = st.session_state.get("live_race_key")
@@ -6646,8 +6725,9 @@ def render_live_panel(rc_date: str, meet: str, race_no: int, selected: List[str]
         st.session_state["live_data"] = cache_data if cache_data else {}
         st.session_state["api_status"] = _end_of_day_cache_status(meet, int(race_no))
         st.session_state["live_race_key"] = current_race_key
-    should_auto_fetch = (not ended_today) and (not st.session_state.get("live_data"))
-    auto_allowed, auto_reason, auto_target_no = _auto_collect_window_by_schedule(rc_date, meet, int(race_no))  # AUTO_5MIN_SCHEDULE_FORCE_GATE
+    # NO_AUTO_SPIN_HARD_STOP: 화면 진입 자동수집 금지. 사용자가 버튼을 눌렀을 때만 수집합니다.
+    should_auto_fetch = False
+    auto_allowed, auto_reason, auto_target_no = False, "자동수집 OFF · 버튼 실행 대기", None
     if auto_target_no:
         race_no = int(auto_target_no)
     st.caption(f"자동수집 상태: {auto_reason}")
@@ -6669,8 +6749,8 @@ def render_live_panel(rc_date: str, meet: str, race_no: int, selected: List[str]
     render_no_click_api_excel_viewer(compact=False, meet=meet)  # NO_CLICK_API_VIEWER_PC_APPLY
     render_excel_detail_workbook_center(st.session_state.get("live_data", {}), st.session_state.get("api_status", pd.DataFrame()), rc_date, meet, race_no, compact=False)  # EXCEL_DETAIL_CENTER_PC_APPLY
     render_api_received_file_viewer(st.session_state.get("live_data", {}), st.session_state.get("api_status", pd.DataFrame()), rc_date, meet, race_no, compact=False)  # PC_API_RECEIVED_FILE_VIEWER_APPLY
-    should_auto_fetch = bool(auto_allowed)
-    if run or run_sim or should_auto_fetch:
+    should_auto_fetch = False
+    if run or run_sim:
         with st.spinner(f"{meet} {int(race_no)}경주 실시간 API 수집 중... 최대 30~60초 걸릴 수 있습니다."):
             data, status = fetch_all_live(rc_date, meet, int(race_no), selected)
         data = _filter_data_selected_race(data, rc_date, meet, int(race_no)) if "_filter_data_selected_race" in globals() else data
@@ -6759,7 +6839,7 @@ def render_live_panel(rc_date: str, meet: str, race_no: int, selected: List[str]
         st.markdown("- 자동구매/자동결제는 하지 않습니다.\n- 공식 화면으로 이동 후 직접 입력/확정합니다.\n- 배당은 경주 직전까지 변동됩니다.")
         if sample_mode:
             st.warning("현재 추천은 실전 검증 전이라 허브 저장을 막았습니다. 실제 현재 경주 API 데이터가 들어온 뒤 저장하세요.")
-        elif st.button("현재 분석 허브 저장", type="primary"):
+        elif st.button("현재 분석 허브 저장", type="primary", key="save_current_analysis_to_hub"):
             row = {
                 "저장시각": now_str(), "날짜": rc_date, "경마장": meet, "경주번호": int(race_no),
                 "경주시간": st.session_state.get("race_time_text", ""),
@@ -6966,7 +7046,7 @@ def sequential_26api_step(rc_date: str, meet: str, race_no: Any, step_count: int
 
     return item
 
-def render_sequential_26api_center(rc_date: str, meet: str, race_no: Any) -> None:
+def render_sequential_26api_center_legacy_disabled(rc_date: str, meet: str, race_no: Any) -> None:
     """26개 API 하나씩 접속→저장→다음 API 진행 센터."""
     st.markdown("### 🔁 26개 API 순차 수집센터")
     st.caption("한 번에 26개를 모두 호출하지 않고, 1개씩 접속해서 받은 자료를 저장한 뒤 다음 API로 넘어갑니다.")
@@ -6983,14 +7063,14 @@ def render_sequential_26api_center(rc_date: str, meet: str, race_no: Any) -> Non
     with c0:
         step_count = st.selectbox("한 번에 진행", [1, 2, 3, 5], index=0, key="seq_api_step_count")
     with c1:
-        auto_seq = st.toggle("자동 순차 진행", value=True, key="seq_api_auto_run", help="켜두면 새로고침마다 다음 API를 1개씩 받아 저장합니다.")
+        auto_seq = st.toggle("자동 순차 진행", value=False, key="seq_api_auto_run", help="켜두면 새로고침마다 다음 API를 1개씩 받아 저장합니다.")
     with c2:
         if st.button("처음부터 다시", key="seq_api_reset", width="stretch"):
             reset_sequential_26api(rc_date, meet_run, race_run)
             st.rerun()
 
     state = _load_seq_state().get(_seq_target_id(rc_date, meet_run, race_run), {})
-    if auto_seq and not state.get("완료", False):
+    if auto_seq and _hub365_is_background_tick_request() and not _is_mobile_mode() and not state.get("완료", False):
         with st.spinner(f"{meet_run} {race_run}R API {step_count}개 순차 수집 중..."):
             state = sequential_26api_step(rc_date, meet_run, race_run, int(step_count))
 
@@ -7179,16 +7259,19 @@ def force_collect_real_data_for_targets(rc_date: str = "", targets: Optional[pd.
 
 def render_force_real_collection_center(rc_date: str, selected: List[str], targets: Optional[pd.DataFrame] = None) -> None:
     st.markdown("### 📥 실제 자료 수집센터")
-    st.caption("첫 화면은 빠른 핵심 API만 먼저 수집합니다. 전체 26개는 상세 확인 때 호출합니다.")
+    st.caption("PC 화면 진입만으로 핵심 API를 수집하지 않습니다. 버튼/백그라운드 호출 때만 실행합니다.")
 
-    auto_key = f"force_real_collect_fast_once_{rc_date}_{now_kst().strftime('%H%M') if 'now_kst' in globals() else 'now'}"
-    if not st.session_state.get(auto_key):
+    manual_collect = st.button("📥 핵심 API 빠른 수집 1회 실행", key=f"force_real_collect_manual_{rc_date}")
+    can_collect = manual_collect or (_hub365_network_allowed() if "_hub365_network_allowed" in globals() else False)
+    if can_collect:
+        if manual_collect:
+            st.session_state["_hub365_network_allowed"] = True
         with st.spinner("핵심 API 빠른 수집 중... 보통 10~25초"):
             data, status = force_collect_real_data_for_targets(rc_date, targets, selected, fast_first=True)
-            st.session_state[auto_key] = True
     else:
         data = st.session_state.get("live_data", {}) or {}
         status = st.session_state.get("api_status", pd.DataFrame())
+        st.info("대기 중 · 자동수집 차단됨. 필요할 때 [핵심 API 빠른 수집 1회 실행]을 누르세요.")
 
     total_rows = int(sum(len(v) for v in data.values() if hasattr(v, "__len__"))) if isinstance(data, dict) else 0
     c1, c2, c3, c4 = st.columns(4)
@@ -7388,7 +7471,7 @@ def render_triple18_dashboard_module(result: Dict[str, Any], meet: str) -> None:
     copy_text = f"{meet} 삼쌍승 18장 / 각 1,000원 / 총 {total_amount:,}원\n" + "\n".join([f"{i}. {c} / 1,000원" for i, c in enumerate(tickets, start=1)])
     st.markdown("#### 📋 복사용 추천번호")
     st.code(copy_text, language="text")
-    st.download_button("추천번호 텍스트 받기", data=copy_text.encode("utf-8"), file_name="MARU_삼쌍승18장.txt", mime="text/plain", width="stretch")
+    st.download_button("추천번호 텍스트 받기", data=copy_text.encode("utf-8"), file_name="MARU_삼쌍승18장.txt", mime="text/plain", width="stretch", key="triple18_download_text_btn")
     st.link_button("↗ 더비온 공식 구매표 열기", kra_buy_url(meet), type="primary", width="stretch")
     st.caption("※ 추천번호를 복사/확인한 뒤 공식 구매 페이지에서 사용자가 직접 입력·결제합니다.")
 
@@ -7636,6 +7719,16 @@ def build_recommendation_after_each_race(rc_date: str, meet: str, race_no: Any, 
         try:
             if "_build_three_type_recommendation" in globals():
                 result = _build_three_type_recommendation(result)
+            # 14ROUND_TARGET_LOCK: 추천 보조함수가 값을 보정해도 실제 수집 대상 날짜/경마장/경주번호는 유지
+            try:
+                result.update({
+                    "날짜": rc_date,
+                    "경마장": meet,
+                    "경주번호": int(race_no),
+                    "상태": f"{meet} {race_no}R 추천 생성 완료",
+                })
+            except Exception:
+                pass
         except Exception:
             pass
 
@@ -7875,7 +7968,7 @@ def _seq_last_row_status(item: Dict[str, Any]) -> str:
     except Exception:
         return ""
 
-def render_sequential_26api_center(rc_date: str, meet: str, race_no: Any) -> None:
+def render_sequential_26api_center_legacy_disabled_1(rc_date: str, meet: str, race_no: Any) -> None:
     """
     멈춤 방지 버전.
     - 자동 순차 진행 ON이면 화면 새로고침 때마다 1개씩 실제 진행
@@ -7932,24 +8025,24 @@ def render_sequential_26api_center(rc_date: str, meet: str, race_no: Any) -> Non
 
     col_a, col_b, col_c = st.columns([1,1,1])
     with col_a:
-        step_count = st.selectbox("한 번에 진행", [1, 2, 3, 5], index=0, key=f"seq_step_count_{target}")
+        step_count = st.selectbox("한 번에 진행", [1, 2, 3, 5], index=0, key=f"seq_step_count_legacy_{target}")
     with col_b:
-        auto_on = st.toggle("자동 순차 진행", value=True, key=f"seq_auto_on_{target}")
+        auto_on = st.toggle("자동 순차 진행", value=False, key=f"seq_auto_on_legacy_{target}")
     with col_c:
-        refresh_sec = st.selectbox("멈춤방지 새로고침", [5, 10, 15, 30, 60], index=1, key=f"seq_refresh_sec_{target}")
+        refresh_sec = st.selectbox("멈춤방지 새로고침", [5, 10, 15, 30, 60], index=1, key=f"seq_refresh_sec_legacy_{target}")
 
     b1, b2, b3 = st.columns(3)
-    if b1.button("▶ 다음 API 1개 즉시 진행", key=f"seq_next_{target}", use_container_width=True):
+    if b1.button("▶ 다음 API 1개 즉시 진행", key=f"seq_next_legacy_{target}", use_container_width=True):
         sequential_26api_step(rc_date, meet2, race_no2, 1)
         st.rerun()
-    if b2.button("⏭ 선택 개수 진행", key=f"seq_multi_{target}", use_container_width=True):
+    if b2.button("⏭ 선택 개수 진행", key=f"seq_multi_legacy_{target}", use_container_width=True):
         sequential_26api_step(rc_date, meet2, race_no2, int(step_count))
         st.rerun()
-    if b3.button("🔄 처음부터 다시", key=f"seq_reset_{target}", use_container_width=True):
+    if b3.button("🔄 처음부터 다시", key=f"seq_reset_legacy_{target}", use_container_width=True):
         reset_sequential_26api(rc_date, meet2, race_no2)
         st.rerun()
 
-    if auto_on and done < total and not _is_mobile_mode():
+    if auto_on and _hub365_is_background_tick_request() and done < total and not _is_mobile_mode():
         now_ts = time.time()
         last_ts_key = f"_seq_last_auto_ts_{target}"
         last_ts = float(st.session_state.get(last_ts_key, 0) or 0)
@@ -7960,7 +8053,7 @@ def render_sequential_26api_center(rc_date: str, meet: str, race_no: Any) -> Non
         else:
             st.markdown(f"<meta http-equiv='refresh' content='{int(refresh_sec)}'>", unsafe_allow_html=True)
 
-    if auto_on and done < total and not _is_mobile_mode():
+    if auto_on and _hub365_is_background_tick_request() and done < total and not _is_mobile_mode():
         st.markdown(f"<meta http-equiv='refresh' content='{int(refresh_sec)}'>", unsafe_allow_html=True)
 
     state = _load_seq_state()
@@ -8099,6 +8192,16 @@ def build_recommendation_after_each_race(rc_date: str, meet: str, race_no: Any, 
         try:
             if "_build_three_type_recommendation" in globals():
                 result = _build_three_type_recommendation(result)
+            # 14ROUND_TARGET_LOCK: 추천 보조함수가 값을 보정해도 실제 수집 대상 날짜/경마장/경주번호는 유지
+            try:
+                result.update({
+                    "날짜": rc_date,
+                    "경마장": meet,
+                    "경주번호": int(race_no),
+                    "상태": f"{meet} {race_no}R 추천 생성 완료",
+                })
+            except Exception:
+                pass
         except Exception:
             pass
 
@@ -8238,7 +8341,7 @@ def render_sequential_26api_center(rc_date: str, meet: str, race_no: Any) -> Non
     with col_a:
         step_count = st.selectbox("한 번에 진행", [1, 2, 3, 5], index=0, key=f"seq_step_count_{widget_scope}")
     with col_b:
-        auto_on = st.toggle("자동 순차 진행", value=True, key=f"seq_auto_on_{widget_scope}")
+        auto_on = st.toggle("자동 순차 진행", value=False, key=f"seq_auto_on_{widget_scope}")
     with col_c:
         refresh_sec = st.selectbox("멈춤방지 새로고침", [5, 10, 15, 30, 60], index=1, key=f"seq_refresh_sec_{widget_scope}")
 
@@ -8253,7 +8356,7 @@ def render_sequential_26api_center(rc_date: str, meet: str, race_no: Any) -> Non
         reset_sequential_26api(rc_date, meet2, race_no2)
         st.rerun()
 
-    if auto_on and done < total and not _is_mobile_mode():
+    if auto_on and _hub365_is_background_tick_request() and done < total and not _is_mobile_mode():
         now_ts = time.time()
         last_ts_key = f"_seq_last_auto_ts_{widget_scope}"
         last_ts = float(st.session_state.get(last_ts_key, 0) or 0)
@@ -8264,7 +8367,7 @@ def render_sequential_26api_center(rc_date: str, meet: str, race_no: Any) -> Non
         else:
             st.markdown(f"<meta http-equiv='refresh' content='{int(refresh_sec)}'>", unsafe_allow_html=True)
 
-    if auto_on and done < total and not _is_mobile_mode():
+    if auto_on and _hub365_is_background_tick_request() and done < total and not _is_mobile_mode():
         st.markdown(f"<meta http-equiv='refresh' content='{int(refresh_sec)}'>", unsafe_allow_html=True)
 
     state = _load_seq_state()
@@ -8301,7 +8404,7 @@ def render_mobile_safe_home(rc_date: str = "", meet: str = "전체", race_no: An
     모바일에서는 26개 API 자동 순차수집/무한 rerun/meta refresh를 직접 돌리지 않고,
     이미 생성된 추천/허브 추천/세션 추천만 빠르게 보여줍니다.
     """
-    st.set_page_config(page_title="MARU KRA 모바일", page_icon="🏇", layout="centered")
+    # set_page_config는 앱 시작부에서 1회만 호출합니다.
     st.markdown("## 🏇 MARU KRA 모바일")
     st.caption("모바일은 구매 전용 경량 화면입니다. 무거운 26개 API 자동수집은 PC 관리화면에서 돌립니다.")
 
@@ -8454,7 +8557,7 @@ def render_mobile_safe_home(rc_date: str = "", meet: str = "전체", race_no: An
     모바일은 추천을 생성하지 않습니다.
     허브에 저장된 PC 확인 추천 결과만 보여주는 화면입니다.
     """
-    st.set_page_config(page_title="MARU KRA 모바일", page_icon="🏇", layout="centered")
+    # set_page_config는 앱 시작부에서 1회만 호출합니다.
     st.markdown("## 🏇 MARU KRA 모바일 추천결과")
     st.info("🛡️ stable2 안정화판 적용됨")  # STABLE_VERSION_MOBILE_BADGE_APPLY
     st.caption("모바일은 계산/수집 화면이 아니라 PC에서 확인 후 허브에 저장한 추천 결과를 보는 화면입니다.")
@@ -8648,6 +8751,13 @@ def hub_collect_save_analyze_recommend(rc_date: str, meet: str, race_no: Any) ->
         rec["분석완료시각"] = now_str() if "now_str" in globals() else str(dt.datetime.now())
         rec["모바일표시"] = "Y"
         rec["추천출처"] = "허브자료_분석추천"
+        try:
+            rec["실시간행수"] = int(sum(len(df) for df in (data or {}).values() if isinstance(df, pd.DataFrame)))
+            rec["API상태행수"] = int(len(status)) if isinstance(status, pd.DataFrame) else 0
+            if "_hub365_probability_from_hub" in globals():
+                rec.update(_hub365_probability_from_hub(rec))
+        except Exception as _prob_e:
+            rec["확률계산상태"] = f"대기: {str(_prob_e)[:80]}"
         rec_verify = double_safety_save("mobile_recommend", rec)
         double_safety_save("analysis_recommend_log", rec)
         result["추천"] = rec
@@ -8721,7 +8831,7 @@ def render_mobile_safe_home(rc_date: str = "", meet: str = "전체", race_no: An
     허브/구글시트에 저장된 mobile_recommend만 표시.
     모바일에서 자료수집/분석은 하지 않습니다.
     """
-    st.set_page_config(page_title="MARU KRA 모바일", page_icon="🏇", layout="centered")
+    # set_page_config는 앱 시작부에서 1회만 호출합니다.
     st.markdown("## 🏇 MARU KRA 모바일 추천결과")
     st.caption("허브/구글시트에 저장된 최종 추천만 보여줍니다.")
 
@@ -9189,8 +9299,8 @@ def render() -> None:
             st.success("공공데이터 API Key 자동 적용됨 · 모바일 재입력 불필요")
             st.caption(f"키 출처: {get_api_key_source()} / {masked_api_key()}")
             with st.expander("API Key 변경/재저장", expanded=False):
-                key_input = st.text_input("공공데이터 API Key", value=current_key, type="password", placeholder="공공데이터 일반 인증키 입력")
-                if st.button("API Key 저장", width="stretch"):
+                key_input = st.text_input("공공데이터 API Key", value=current_key, type="password", placeholder="공공데이터 일반 인증키 입력", key="api_key_change_input")
+                if st.button("API Key 저장", width="stretch", key="api_key_save_btn"):
                     if key_input.strip():
                         st.session_state["api_key_saved"] = key_input.strip()
                         if save_local_settings({"api_key": key_input.strip(), "saved_at_kst": now_str()}):
@@ -9203,8 +9313,8 @@ def render() -> None:
         else:
             st.error("API Key 없음")
             st.info("모바일 입력이 힘들면 PC에서 Streamlit Secrets 또는 .streamlit/secrets.toml에 한 번만 저장하세요.")
-            key_input = st.text_input("공공데이터 API Key", value="", type="password", placeholder="공공데이터 일반 인증키 입력")
-            if st.button("API Key 저장", width="stretch"):
+            key_input = st.text_input("공공데이터 API Key", value="", type="password", placeholder="공공데이터 일반 인증키 입력", key="api_key_empty_input")
+            if st.button("API Key 저장", width="stretch", key="api_key_empty_save_btn"):
                 if key_input.strip():
                     st.session_state["api_key_saved"] = key_input.strip()
                     if save_local_settings({"api_key": key_input.strip(), "saved_at_kst": now_str()}):
@@ -9215,26 +9325,26 @@ def render() -> None:
                 else:
                     st.warning("API Key를 입력해 주세요.")
 
-        rc_date = st.text_input("분석 날짜", value=today_kst())
-        race_scope = st.selectbox("운영 범위", ["전체 경마장 자동", "선택 경마장/경주"], index=1, help="기본은 선택 경마장/경주 확인용입니다. 전체 경마장 자동은 버튼을 눌렀을 때만 실행되어 계속 도는 현상을 막습니다.")
+        rc_date = st.text_input("분석 날짜", value=today_kst(), key="analysis_date_input")
+        race_scope = st.selectbox("운영 범위", ["전체 경마장 자동", "선택 경마장/경주"], index=1, help="기본은 선택 경마장/경주 확인용입니다. 전체 경마장 자동은 버튼을 눌렀을 때만 실행되어 계속 도는 현상을 막습니다.", key="race_scope_select")
         st.session_state["race_scope"] = race_scope
         if race_scope == "전체 경마장 자동":
             meet = "전체"
             race_no = 0
             st.success("서울·부산경남·제주 전체 경주일정 자동 확인 모드")
         else:
-            meet = st.selectbox("경마장", ["서울", "부산경남", "제주"], index=0)
-            race_no = st.number_input("경주번호", min_value=1, max_value=20, value=1, step=1)
-        race_time_text = st.text_input("경주 예정시각", value=st.session_state.get("race_time_text", ""), placeholder="예: 14:30")
+            meet = st.selectbox("경마장", ["서울", "부산경남", "제주"], index=0, key="meet_select_main")
+            race_no = st.number_input("경주번호", min_value=1, max_value=20, value=1, step=1, key="race_no_input_main")
+        race_time_text = st.text_input("경주 예정시각", value=st.session_state.get("race_time_text", ""), placeholder="예: 14:30", key="race_time_text_input")
         st.session_state["race_time_text"] = race_time_text
-        sim_count = st.slider("시뮬레이션", 300, 5000, 1200, step=100)
-        risk_mode = st.selectbox("전략", ["균형형", "안전형", "공격형"], index=0)
-        collection_mode = st.selectbox("API 수집 모드", ["실시간 API 우선 + 허브 보조", "스마트 자동", "아침 사전수집", "경주 전 1회수집", "실시간 집중", "허브만 분석", "수동 ON/OFF", "전체 26개"], index=0, help="기본값은 실시간 API를 먼저 확인하고, 실패/0건일 때만 허브 캐시를 보조로 사용합니다. 허브만 분석은 API를 호출하지 않는 확인용 모드입니다.")
+        sim_count = st.slider("시뮬레이션", 300, 5000, 1200, step=100, key="sim_count_slider")
+        risk_mode = st.selectbox("전략", ["균형형", "안전형", "공격형"], index=0, key="risk_mode_select")
+        collection_mode = st.selectbox("API 수집 모드", ["실시간 API 우선 + 허브 보조", "스마트 자동", "아침 사전수집", "경주 전 1회수집", "실시간 집중", "허브만 분석", "수동 ON/OFF", "전체 26개"], index=5, help="기본값은 허브만 분석입니다. 화면 진입만으로 API를 호출하지 않고, 필요한 버튼을 눌렀을 때만 1회 수집합니다.", key="collection_mode_select")
         st.session_state["collection_mode"] = collection_mode
         default_refresh = smart_default_refresh_seconds(collection_mode)
         refresh_options = [0, 60, 120, 300, 600, 3600]
         refresh_index = refresh_options.index(default_refresh) if default_refresh in refresh_options else 0
-        auto_refresh = st.selectbox("자동 새로고침", refresh_options, index=refresh_index, format_func=lambda x: "OFF" if x == 0 else ("1시간" if x == 3600 else f"{x}초"))
+        auto_refresh = st.selectbox("자동 새로고침", refresh_options, index=refresh_index, format_func=lambda x: "OFF" if x == 0 else ("1시간" if x == 3600 else f"{x}초"), key="auto_refresh_select")
         render_api_onoff_panel()
         switches = get_api_switches()
         selected = [k for k, _ in API_LABELS if switches.get(k, False)]
@@ -9286,14 +9396,10 @@ def render() -> None:
         status2 = st.session_state.get("api_status", pd.DataFrame())
         data3 = st.session_state.get("live_data", {})
         if status2 is None or not isinstance(status2, pd.DataFrame) or status2.empty:
-            if st.session_state.get("race_scope") == "전체 경마장 자동":
-                sched_probe, _log_probe = load_all_meet_schedule_for_monitor(rc_date) if "load_all_meet_schedule_for_monitor" in globals() else (pd.DataFrame(), pd.DataFrame())
-                targets_probe = _current_or_next_races(sched_probe, per_meet=1) if "_current_or_next_races" in globals() else pd.DataFrame()
-                data3, status2 = force_collect_real_data_for_targets(rc_date, targets_probe, selected)  # FORCE_REAL_COLLECTION_API_TAB_APPLY
-            else:
-                meet_probe = "서울" if str(meet) == "전체" else meet
-                race_probe = 1 if int(race_no or 0) <= 0 else int(race_no)
-                data3, status2 = immediate_api_status_probe(rc_date, meet_probe, race_probe, selected)  # IMMEDIATE_API_TAB_PROBE_APPLY
+            # NO_AUTO_SPIN_HARD_STOP: API/허브 탭 진입만으로 즉시 API 점검을 돌리지 않습니다.
+            st.info("API 상태표 대기 중 · 자동 점검은 꺼져 있습니다. 필요한 수집/점검 버튼을 눌렀을 때만 1회 실행합니다.")
+            status2 = pd.DataFrame()
+            data3 = {}
         st.success("✅ API URL 26개 자동 탑재 완료: 재입력 없이 호출/ON-OFF만 사용")
         st.info("결과/배당 계열 일부 API는 경주시간 전이면 대기 상태가 정상입니다. 하지만 상태표는 즉시 표시됩니다.")
         render_api_hub_panel(status2, data3)
@@ -9413,13 +9519,30 @@ def _agent365_safe_pct(v: Any, default: int = 0) -> int:
 
 
 def _agent365_count_hub(kind: str) -> int:
+    # 11ROUND_NO_VIEW_HUB_STORM:
+    # 일반 PC/모바일 화면에서 확률 표시용 카운트를 얻으려고 구글시트를 여러 번 호출하지 않습니다.
+    # 외부 허브 조회는 Apps Script tick 또는 수동 허브 실행 때만 허용합니다.
     try:
-        data = external_hub_load(kind) if "external_hub_load" in globals() else {}
-        if isinstance(data, list):
-            return len(data)
-        if isinstance(data, dict) and data:
-            # Apps Script 허브가 최신 1건만 돌려주는 경우도 카운트 1로 인정
-            return int(data.get("count", 1) or 1)
+        allow_network = "_hub365_network_allowed" in globals() and _hub365_network_allowed()
+    except Exception:
+        allow_network = False
+    if allow_network:
+        try:
+            data = external_hub_load(kind) if "external_hub_load" in globals() else {}
+            if isinstance(data, list):
+                return len(data)
+            if isinstance(data, dict) and data:
+                # Apps Script 허브가 최신 1건만 돌려주는 경우도 카운트 1로 인정
+                return int(data.get("count", 1) or 1)
+        except Exception:
+            pass
+    # 네트워크가 허용되지 않은 일반 화면에서는 로컬 백업 파일 존재 여부만 가볍게 확인합니다.
+    try:
+        d = DATA_DIR if "DATA_DIR" in globals() else Path("maru_kra_data")
+        for ext in [".json", ".csv"]:
+            fp = d / f"{kind}{ext}"
+            if fp.exists() and fp.stat().st_size > 2:
+                return 1
     except Exception:
         pass
     return 0
@@ -9556,7 +9679,16 @@ def render_agent365_control_center(compact: bool = False) -> None:
     except Exception:
         latest = {}
     latest = _apply_agent365_probability(latest)
-    status = _agent365_tick("mobile" if compact else "pc", latest)
+    status = {
+        "저장시각": now_str() if "now_str" in globals() else "",
+        "버전": AGENT365_VERSION,
+        "실행출처": "mobile_view" if compact else "pc_view",
+        "365일운영": "대기",
+        "PC꺼짐대응": "Apps Script 시간트리거가 agent_tick=1로 호출할 때 실행",
+        "확률": _agent365_probability(latest),
+        "자동구매": "없음",
+        "자동결제": "없음",
+    }
     if compact:
         p = status.get("확률", {})
         st.markdown(f"""
@@ -9645,14 +9777,11 @@ def _render_mobile_compact_3type_view(row: Dict[str, Any]) -> None:
     </div>
     """, unsafe_allow_html=True)
 
-    try:
-        _agent365_tick("mobile_recommend_render", row)
-    except Exception:
-        pass
+    # 화면 표시만으로 허브에 쓰지 않습니다. Apps Script/background tick 또는 저장 버튼일 때만 기록합니다.
     copy_text = _three_type_mobile_ticket(row) if "_three_type_mobile_ticket" in globals() else str(row.get("구매표복사", ""))
     c1, c2 = st.columns(2)
     with c1:
-        st.download_button("📋 18장 텍스트", copy_text, file_name=f"maru_{meet}_{race_no}R_18tickets.txt")
+        st.download_button("📋 18장 텍스트", copy_text, file_name=f"maru_{meet}_{race_no}R_18tickets.txt", key="mobile_18tickets_download")
     with c2:
         st.link_button("↗ 더비온 열기", "https://www.derbyon.co.kr")
 
@@ -9669,6 +9798,7 @@ def _render_mobile_compact_3type_view(row: Dict[str, Any]) -> None:
 # =============================================================================
 MARU_KRA_FIXED_SHEET_ID = "1uT8lQfbpjhblvFOsFdBSmAnGHXzqhlZQ5jsBayLTpwo"
 MARU_KRA_FIXED_GID = "909440003"
+MARU_KRA_FINAL_PRECHECK_ROUND = "13ROUND"
 MARU_KRA_HUB365_VERSION = "cloud_hub_365_final_v1"
 MARU_KRA_HUB_KINDS_FINAL = [
     "mobile_recommend",
@@ -9751,21 +9881,59 @@ def _hub365_safe_save(kind: str, payload: dict) -> bool:
 
 
 def _hub365_count(kind: str) -> int:
-    data = _hub365_safe_load(kind)
+    # 화면 진입만으로 외부 허브를 여러 번 읽지 않습니다.
+    # background tick/수동 실행 때만 외부 허브를 조회하고, 일반 화면은 로컬 캐시만 확인합니다.
     try:
-        if isinstance(data, dict):
-            if isinstance(data.get("rows"), list):
-                return len(data.get("rows") or [])
-            if data.get("count") not in [None, ""]:
-                return int(float(str(data.get("count")).replace(",", "")))
-            return 1 if data else 0
+        allow_network = "_hub365_network_allowed" in globals() and _hub365_network_allowed()
     except Exception:
-        return 0
+        allow_network = False
+    if allow_network:
+        data = _hub365_safe_load(kind)
+        try:
+            if isinstance(data, dict):
+                if isinstance(data.get("rows"), list):
+                    return len(data.get("rows") or [])
+                if data.get("count") not in [None, ""]:
+                    return int(float(str(data.get("count")).replace(",", "")))
+                return 1 if data else 0
+        except Exception:
+            return 0
+    try:
+        d = DATA_DIR if "DATA_DIR" in globals() else Path("maru_kra_data")
+        fp = d / f"{kind}.json"
+        if fp.exists() and fp.stat().st_size > 2:
+            return 1
+    except Exception:
+        pass
     return 0
 
 
+def _hub365_is_background_tick_request() -> bool:
+    try:
+        q = st.query_params
+        vals = []
+        for k in ["agent_tick", "hub365_tick", "background_tick"]:
+            v = q.get(k, "")
+            if isinstance(v, list):
+                vals += [str(x).lower() for x in v]
+            else:
+                vals.append(str(v).lower())
+        return any(v in ["1", "true", "yes", "on"] for v in vals)
+    except Exception:
+        return False
+
+def _hub365_network_allowed() -> bool:
+    try:
+        if bool(st.session_state.get("_hub365_network_allowed", False)):
+            return True
+    except Exception:
+        pass
+    return _hub365_is_background_tick_request()
+
 def _hub365_schedule_rows(rc_date: str = None) -> int:
     rc_date = rc_date or _hub365_today()
+    if not _hub365_network_allowed():
+        return 0
     total = 0
     try:
         for meet_name in ["서울", "부산경남", "제주"]:
@@ -9915,10 +10083,17 @@ def _hub365_status_tick(source: str = "screen", latest: dict = None) -> dict:
         "자동결제": "없음",
         "마권구매": "더비온 등 공식 구매 페이지에서 사용자가 직접 입력·확정",
     }
-    _hub365_safe_save("hub_365_status", status)
-    _hub365_safe_save("agent_365_runs", status)
-    _hub365_safe_save("success_fail_reason", lesson)
-    _hub365_safe_save("probability_memory", prob)
+    # 화면 표시만으로 구글시트/허브에 쓰지 않습니다.
+    # PC 버튼 실행 또는 Apps Script background tick일 때만 저장합니다.
+    try:
+        allow_save = ("_hub365_network_allowed" in globals() and _hub365_network_allowed()) or str(source).lower() not in ["screen", "pc", "mobile", "pc_view", "mobile_view"]
+    except Exception:
+        allow_save = False
+    if allow_save:
+        _hub365_safe_save("hub_365_status", status)
+        _hub365_safe_save("agent_365_runs", status)
+        _hub365_safe_save("success_fail_reason", lesson)
+        _hub365_safe_save("probability_memory", prob)
     return status
 
 
@@ -9944,6 +10119,10 @@ def _hub365_make_no_race_mobile_status(latest: dict = None) -> dict:
 
 def run_hub365_cycle(source: str = "manual") -> dict:
     """허브 중심 365일 1회 실행. 경주 없는 날은 학습/복습, 경주 있는 날은 추천/상태저장 중심."""
+    try:
+        st.session_state["_hub365_network_allowed"] = True
+    except Exception:
+        pass
     latest = {}
     try:
         latest = load_mobile_recommend_json() if "load_mobile_recommend_json" in globals() else _hub365_safe_load("mobile_recommend")
@@ -9991,6 +10170,32 @@ def run_hub365_cycle(source: str = "manual") -> dict:
         })
     return status
 
+
+
+# 12ROUND_NETWORK_FLAG_RESET_FIX
+# run_hub365_cycle는 수동 버튼/Apps Script 호출 중에만 외부 허브 네트워크를 허용해야 합니다.
+# 기존 코어 함수가 session_state 플래그를 True로 남길 수 있어, 실행 뒤 반드시 원복합니다.
+_run_hub365_cycle_core_12round = run_hub365_cycle
+def run_hub365_cycle(source: str = "manual") -> dict:
+    prev_flag = False
+    try:
+        prev_flag = bool(st.session_state.get("_hub365_network_allowed", False))
+    except Exception:
+        prev_flag = False
+    try:
+        st.session_state["_hub365_network_allowed"] = True
+    except Exception:
+        pass
+    try:
+        return _run_hub365_cycle_core_12round(source)
+    finally:
+        try:
+            if prev_flag:
+                st.session_state["_hub365_network_allowed"] = True
+            else:
+                st.session_state["_hub365_network_allowed"] = False
+        except Exception:
+            pass
 
 def render_hub365_final_center(compact: bool = False) -> None:
     try:
@@ -10040,5 +10245,87 @@ def render_agent365_control_center(compact: bool = False) -> None:
     render_hub365_final_center(compact=compact)
 
 
+
+
+# 9ROUND_SAFE_ENTRYPOINT_OVERRIDE
+# 기존 대시보드 함수는 보존하되, 일반 PC 접속 시 화면 진입만으로 API/경주일정 수집이 돌지 않게
+# 안전 진입점으로 감쌉니다. 기존 전체 화면은 사용자가 버튼을 누를 때만 열 수 있습니다.
+try:
+    render_legacy_full_dashboard = render
+except Exception:
+    render_legacy_full_dashboard = None
+
+def render() -> None:
+    # 12ROUND_SAFE_VIEW_FLAG_CLEAR: 일반 PC/모바일 화면은 이전 실행의 네트워크 허용 플래그를 이어받지 않습니다.
+    try:
+        if not _hub365_is_background_tick_request():
+            st.session_state["_hub365_network_allowed"] = False
+    except Exception:
+        pass
+    if _should_show_mobile():
+        render_mobile_quick_view()
+        return
+    try:
+        css()
+    except Exception:
+        pass
+    st.markdown("""
+<div class="hero">
+<h2>MARU KRA HUB365 안전 대시보드 · 14ROUND</h2>
+<div class="muted">PC는 확인용 · 일반 접속 자동수집 없음 · Apps Script agent_tick=1 때만 백그라운드 실행 · 모바일은 허브 추천결과만 표시</div>
+</div>
+""", unsafe_allow_html=True)
+    st.caption("자동구매/자동결제 없음. 공식 구매 페이지 이동 후 사용자가 직접 입력·확정합니다.")
+    with st.sidebar:
+        st.title("🐎 MARU KRA")
+        st.success("14ROUND 26API 순차수집 모의검증 안전 진입점")
+        st.info("일반 PC 접속은 자동수집을 실행하지 않습니다.")
+        try:
+            st.link_button("📱 모바일 추천결과", CLOUD_MOBILE_URL, width="stretch")
+        except Exception:
+            st.link_button("📱 모바일 추천결과", "https://maru-kra-final-clean.streamlit.app/?mode=mobile", use_container_width=True)
+        st.link_button("📗 구글시트 허브", f"https://docs.google.com/spreadsheets/d/{MARU_KRA_FIXED_SHEET_ID}/edit#gid={MARU_KRA_FIXED_GID}", use_container_width=True)
+        st.caption("Google Sheet ID는 앱 안에 고정 포함 · 입력창 없음")
+    try:
+        render_agent365_control_center(compact=False)
+    except Exception as e:
+        st.warning(f"허브 365 센터 표시 대기: {str(e)[:120]}")
+    tab1, tab2, tab3 = st.tabs(["허브 상태", "수동 실행", "전체 대시보드"] )
+    with tab1:
+        st.info("화면 확인만으로 API/허브 저장을 실행하지 않습니다. 아래 버튼 또는 Apps Script 트리거만 실행합니다.")
+        try:
+            latest = load_mobile_recommend_json() if "load_mobile_recommend_json" in globals() else {}
+            if latest:
+                st.success("허브 mobile_recommend 최신값 읽기 완료")
+                st.json(latest)
+            else:
+                st.warning("허브 mobile_recommend가 비어 있거나 아직 추천이 없습니다.")
+        except Exception as e:
+            st.warning(f"허브 읽기 대기: {str(e)[:160]}")
+    with tab2:
+        st.markdown("#### 수동 1회 실행")
+        if st.button("🔁 허브 365 1회 실행", key="safe_entry_hub365_once", use_container_width=True):
+            out = run_hub365_cycle("pc_button")
+            st.success("허브 365 1회 실행 완료")
+            st.json(out)
+        st.caption("이 버튼을 누를 때만 허브 저장/분석 작업이 실행됩니다.")
+    with tab3:
+        st.warning("기존 전체 대시보드는 기능 보존용입니다. 열면 무거운 API/관제 화면이 실행될 수 있습니다.")
+        if st.button("🧩 기존 전체 대시보드 수동으로 열기", key="open_legacy_full_dashboard_manual", use_container_width=True):
+            if callable(render_legacy_full_dashboard):
+                render_legacy_full_dashboard()
+            else:
+                st.error("기존 대시보드 함수를 찾지 못했습니다.")
+
 if __name__ == "__main__":
-    render()
+    if "_hub365_is_background_tick_request" in globals() and _hub365_is_background_tick_request():
+        try:
+            result = run_hub365_cycle("apps_script_tick")
+            st.write({"ok": True, "mode": "apps_script_tick", "result": result})
+        except Exception as e:
+            try:
+                st.write({"ok": False, "mode": "apps_script_tick", "error": str(e)[:300]})
+            except Exception:
+                pass
+    else:
+        render()
