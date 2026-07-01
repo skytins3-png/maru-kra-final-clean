@@ -2750,22 +2750,62 @@ def fetch_all_live(rc_date: str, meet: str, race_no: int, selected: List[str]) -
 
 
 
+
+# 24ROUND_SPLIT_URL_SUPPORT
+def _maru24_clean_secret_text(v: str) -> str:
+    try:
+        return str(v or "").replace("\n", "").replace("\r", "").strip()
+    except Exception:
+        return ""
+
+def _maru24_get_secret_any(names):
+    for name in names:
+        try:
+            v = st.secrets.get(name, "")
+            v = _maru24_clean_secret_text(v)
+            if v:
+                return v
+        except Exception:
+            pass
+        try:
+            v = os.environ.get(name, "")
+            v = _maru24_clean_secret_text(v)
+            if v:
+                return v
+        except Exception:
+            pass
+    return ""
+
+def _maru24_get_script_url() -> str:
+    full = _maru24_get_secret_any(["GOOGLE_SCRIPT_URL", "GOOGLE_APPS_SCRIPT_WEBAPP_URL"] )
+    if full:
+        return full
+    groups = [
+        ["GOOGLE_SCRIPT_URL_1", "GOOGLE_SCRIPT_URL_2", "GOOGLE_SCRIPT_URL_3", "GOOGLE_SCRIPT_URL_4"],
+        ["GOOGLE_SCRIPT_URL_PART1", "GOOGLE_SCRIPT_URL_PART2", "GOOGLE_SCRIPT_URL_PART3", "GOOGLE_SCRIPT_URL_PART4"],
+        ["GOOGLE_APPS_SCRIPT_WEBAPP_URL_1", "GOOGLE_APPS_SCRIPT_WEBAPP_URL_2", "GOOGLE_APPS_SCRIPT_WEBAPP_URL_3", "GOOGLE_APPS_SCRIPT_WEBAPP_URL_4"],
+        ["GOOGLE_APPS_SCRIPT_WEBAPP_URL_PART1", "GOOGLE_APPS_SCRIPT_WEBAPP_URL_PART2", "GOOGLE_APPS_SCRIPT_WEBAPP_URL_PART3", "GOOGLE_APPS_SCRIPT_WEBAPP_URL_PART4"],
+    ]
+    for g in groups:
+        parts = [_maru24_get_secret_any([name]) for name in g]
+        parts = [x for x in parts if x]
+        if parts:
+            return "".join(parts).strip()
+    return ""
+
+def _maru24_get_script_token() -> str:
+    return _maru24_get_secret_any(["GOOGLE_SCRIPT_TOKEN", "MARU_KRA_TOKEN"] )
+
+
 # EXTERNAL_HUB_APPS_SCRIPT
 def _external_hub_config() -> Tuple[str, str]:
-    """Streamlit Secrets 또는 환경변수에서 외부 허브 URL/TOKEN을 읽습니다."""
-    url = ""
-    token = ""
+    """Streamlit Secrets/환경변수에서 외부 허브 URL/TOKEN을 읽습니다.
+    24ROUND: 긴 Apps Script URL을 2~4조각으로 나눠 넣어도 자동으로 합칩니다.
+    """
     try:
-        url = str(st.secrets.get("GOOGLE_SCRIPT_URL", "") or st.secrets.get("GOOGLE_APPS_SCRIPT_WEBAPP_URL", "") or "").strip()
-        token = str(st.secrets.get("GOOGLE_SCRIPT_TOKEN", "") or st.secrets.get("MARU_KRA_TOKEN", "") or "").strip()
+        return _maru24_get_script_url(), _maru24_get_script_token()
     except Exception:
-        pass
-    try:
-        url = url or str(os.environ.get("GOOGLE_SCRIPT_URL", "") or os.environ.get("GOOGLE_APPS_SCRIPT_WEBAPP_URL", "") or "").strip()
-        token = token or str(os.environ.get("GOOGLE_SCRIPT_TOKEN", "") or os.environ.get("MARU_KRA_TOKEN", "") or "").strip()
-    except Exception:
-        pass
-    return url, token
+        return "", ""
 
 def external_hub_enabled() -> bool:
     url, _ = _external_hub_config()
@@ -10902,14 +10942,14 @@ except Exception:
 
 
 # =============================================================================
-# 23ROUND_FULL_RESTORE_SAFE_ENTRYPOINT
+# 24ROUND_SPLIT_URL_SUPPORT
 # 목적:
 # - 22ROUND 안전 부팅판에서 전체 대시보드가 사라진 것처럼 보이는 문제를 복구합니다.
 # - 기존 전체 기능은 삭제하지 않고 수동 버튼으로 열 수 있게 보존합니다.
 # - 일반 접속은 무거운 API/시트 자동실행 없이 먼저 화면만 뜹니다.
 # - Apps Script/Google Sheet URL 404 진단과 Secrets 진단을 짧게 확인합니다.
 # =============================================================================
-MARU_KRA_FINAL_PRECHECK_ROUND = "23ROUND_FULL_RESTORE_SAFE_ENTRYPOINT"
+MARU_KRA_FINAL_PRECHECK_ROUND = "24ROUND_SPLIT_URL_SUPPORT"
 
 
 def _maru23_mask(value: str) -> str:
@@ -10943,7 +10983,10 @@ def _maru23_get_secret(name: str) -> str:
 
 def _maru23_secret_diag() -> dict:
     names = [
-        "GOOGLE_SCRIPT_URL", "GOOGLE_APPS_SCRIPT_WEBAPP_URL", "GOOGLE_SCRIPT_TOKEN", "MARU_KRA_TOKEN",
+        "GOOGLE_SCRIPT_URL", "GOOGLE_APPS_SCRIPT_WEBAPP_URL",
+        "GOOGLE_SCRIPT_URL_1", "GOOGLE_SCRIPT_URL_2", "GOOGLE_SCRIPT_URL_3", "GOOGLE_SCRIPT_URL_4",
+        "GOOGLE_SCRIPT_URL_PART1", "GOOGLE_SCRIPT_URL_PART2", "GOOGLE_SCRIPT_URL_PART3", "GOOGLE_SCRIPT_URL_PART4",
+        "GOOGLE_SCRIPT_TOKEN", "MARU_KRA_TOKEN",
         "KRA_API_KEY", "PUBLIC_DATA_API_KEY", "SERVICE_KEY", "DATA_GO_KR_SERVICE_KEY", "OPENAPI_SERVICE_KEY",
         "api_key", "serviceKey", "service_key",
     ]
@@ -10955,9 +10998,13 @@ def _maru23_secret_diag() -> dict:
 
 
 def _maru23_external_config() -> tuple:
-    url = _maru23_get_secret("GOOGLE_SCRIPT_URL") or _maru23_get_secret("GOOGLE_APPS_SCRIPT_WEBAPP_URL")
-    token = _maru23_get_secret("GOOGLE_SCRIPT_TOKEN") or _maru23_get_secret("MARU_KRA_TOKEN")
-    return url, token
+    # 24ROUND: 긴 Apps Script URL을 GOOGLE_SCRIPT_URL_1/2/3 식으로 나눠 넣어도 자동 결합
+    try:
+        return _maru24_get_script_url(), _maru24_get_script_token()
+    except Exception:
+        url = _maru23_get_secret("GOOGLE_SCRIPT_URL") or _maru23_get_secret("GOOGLE_APPS_SCRIPT_WEBAPP_URL")
+        token = _maru23_get_secret("GOOGLE_SCRIPT_TOKEN") or _maru23_get_secret("MARU_KRA_TOKEN")
+        return url, token
 
 
 def _maru23_url_diag() -> dict:
@@ -10977,7 +11024,7 @@ def _maru23_quick_save(kind: str = "hub_365_status", timeout_sec: int = 4) -> di
     url, token = _maru23_external_config()
     payload = {
         "저장시각": _maru23_now(),
-        "버전": "23ROUND_FULL_RESTORE_SAFE_ENTRYPOINT",
+        "버전": "24ROUND_SPLIT_URL_SUPPORT",
         "kind": kind,
         "상태": "QUICK_SAVE_TEST",
         "설명": "전체 기능 복구판의 짧은 허브 저장 진단입니다.",
@@ -11041,8 +11088,8 @@ def _maru23_render_safe_home() -> None:
         st.set_page_config(page_title="MARU KRA 23ROUND", page_icon="🐎", layout="wide")
     except Exception:
         pass
-    st.title("🐎 MARU KRA · 23ROUND 전체기능 복구 안전 화면")
-    st.success("22ROUND에서 사라진 것처럼 보였던 전체 대시보드는 삭제된 것이 아니라 안전부팅 화면에 가려져 있었습니다. 이 버전은 전체 기능을 수동 버튼으로 다시 열 수 있게 복구합니다.")
+    st.title("🐎 MARU KRA · 24ROUND 전체기능 복구 · 긴 URL 분할 입력 지원")
+    st.success("긴 Apps Script URL을 한 줄로 입력하기 어려운 경우 GOOGLE_SCRIPT_URL_1/2/3 조각으로 나눠 넣어도 자동으로 합칩니다. 전체 기능은 수동 버튼으로 다시 열 수 있습니다.")
     st.info("일반 접속은 구글시트 읽기, 26개 API 수집, 전체 대시보드를 자동 실행하지 않습니다. 먼저 화면만 빠르게 뜹니다.")
     st.caption("자동구매/자동결제 없음 · 공식 구매 페이지에서 사용자가 직접 입력/확정")
 
