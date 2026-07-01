@@ -11088,19 +11088,38 @@ def _maru23_render_safe_home() -> None:
         st.set_page_config(page_title="MARU KRA 23ROUND", page_icon="🐎", layout="wide")
     except Exception:
         pass
-    st.title("🐎 MARU KRA · 24ROUND 전체기능 복구 · 긴 URL 분할 입력 지원")
+    st.title("🐎 MARU KRA · 25ROUND 전체 대시보드 유지 · 허브365 실행 후 복귀 방지")
     st.success("긴 Apps Script URL을 한 줄로 입력하기 어려운 경우 GOOGLE_SCRIPT_URL_1/2/3 조각으로 나눠 넣어도 자동으로 합칩니다. 전체 기능은 수동 버튼으로 다시 열 수 있습니다.")
     st.info("일반 접속은 구글시트 읽기, 26개 API 수집, 전체 대시보드를 자동 실행하지 않습니다. 먼저 화면만 빠르게 뜹니다.")
     st.caption("자동구매/자동결제 없음 · 공식 구매 페이지에서 사용자가 직접 입력/확정")
 
     with st.sidebar:
         st.header("상태")
-        st.write("23ROUND FULL RESTORE SAFE")
+        st.write("25ROUND DASHBOARD STAY SAFE")
         try:
             st.link_button("📗 구글시트 허브", f"https://docs.google.com/spreadsheets/d/{MARU_KRA_FIXED_SHEET_ID}/edit", use_container_width=True)
         except Exception:
             pass
         st.warning("Apps Script URL이 404면 저장은 실패합니다. 코드 삭제 문제가 아닙니다.")
+
+    # 25ROUND: 기존 전체 대시보드를 연 뒤 허브365 버튼이 st.rerun()을 호출해도
+    # 안전 화면 첫 탭으로 되돌아가지 않도록 세션 플래그로 유지합니다.
+    if st.session_state.get("_maru25_legacy_dashboard_open", False):
+        st.subheader("기존 전체 대시보드 유지 실행 중")
+        c_back, c_keep = st.columns([1, 3])
+        if c_back.button("↩ 안전 화면으로 돌아가기", key="maru25_close_legacy_dashboard", use_container_width=True):
+            st.session_state["_maru25_legacy_dashboard_open"] = False
+            st.rerun()
+        c_keep.info("허브365 실행 후 화면이 다시 돌아와도 전체 대시보드를 계속 유지합니다.")
+        try:
+            if callable(render_legacy_full_dashboard):
+                render_legacy_full_dashboard()
+            else:
+                st.error("기존 전체 대시보드 함수가 없습니다. GitHub 이전 커밋의 app.py 복구가 필요합니다.")
+        except Exception as e:
+            st.error(f"기존 전체 대시보드 실행 중 오류: {str(e)[:800]}")
+            st.info("안전 화면은 유지됩니다. 오류 내용을 기준으로 다음 패치를 진행해야 합니다.")
+        return
 
     tabs = st.tabs(["1. 복구 확인", "2. 키/URL 진단", "3. 허브 짧은 확인", "4. 전체 대시보드"])
     with tabs[0]:
@@ -11126,15 +11145,10 @@ def _maru23_render_safe_home() -> None:
     with tabs[3]:
         st.subheader("기존 전체 대시보드 수동 복구")
         st.warning("이 버튼은 기존 누적 전체 대시보드를 수동으로 엽니다. 무거울 수 있으니 URL 404를 먼저 고친 뒤 여는 게 좋습니다.")
-        if st.button("🧩 기존 전체 대시보드 수동으로 열기", key="maru23_open_legacy_full_dashboard", use_container_width=True):
-            try:
-                if callable(render_legacy_full_dashboard):
-                    render_legacy_full_dashboard()
-                else:
-                    st.error("기존 전체 대시보드 함수가 없습니다. 이 경우 GitHub 이전 커밋에서 app.py 복구가 필요합니다.")
-            except Exception as e:
-                st.error(f"기존 전체 대시보드 실행 중 오류: {str(e)[:500]}")
-                st.info("안전 화면은 유지됩니다. 전체 기능 파일 자체가 삭제된 것은 아닙니다.")
+        if st.button("🧩 기존 전체 대시보드 수동으로 열기", key="maru25_open_legacy_full_dashboard", use_container_width=True):
+            st.session_state["_maru25_legacy_dashboard_open"] = True
+            st.rerun()
+        st.caption("25ROUND: 이 버튼을 누르면 전체 대시보드 유지 모드가 켜집니다. 허브365 실행 후에도 이 화면으로 되돌아오지 않게 막았습니다.")
 
 
 def _maru23_final_entrypoint() -> None:
@@ -11146,7 +11160,7 @@ def _maru23_final_entrypoint() -> None:
         # Apps Script tick은 길게 붙잡지 않고 짧은 상태 저장만 시도합니다.
         result = _maru23_quick_save("hub_365_status", timeout_sec=4)
         try:
-            st.write({"ok": True, "round": "23ROUND", "mode": "apps_script_tick", "save": result})
+            st.write({"ok": True, "round": "25ROUND", "mode": "apps_script_tick", "save": result})
         except Exception:
             pass
         return
